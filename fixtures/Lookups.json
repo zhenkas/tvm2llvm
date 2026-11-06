@@ -1,0 +1,138 @@
+{
+  "compiler": "0.8.26+commit.8a97fa7a.Emscripten.clang",
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "istanbul",
+    "metadata": {
+      "bytecodeHash": "none"
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "storageLayout",
+          "evm.methodIdentifiers",
+          "evm.deployedBytecode.object",
+          "evm.deployedBytecode.sourceMap",
+          "evm.deployedBytecode.opcodes"
+        ]
+      }
+    }
+  },
+  "source_sha256": "673a77d1b331a4ae9c39470f1b86c84ee28a2f98d06282712eeb019a9f565129",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "bytes",
+          "name": "data",
+          "type": "bytes"
+        }
+      ],
+      "name": "hashBytes",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "index",
+          "type": "uint256"
+        }
+      ],
+      "name": "listGet",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "who",
+          "type": "address"
+        }
+      ],
+      "name": "mapGet",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "storage_layout": {
+    "storage": [
+      {
+        "astId": 5,
+        "contract": "Lookups.sol:Lookups",
+        "label": "balances",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_mapping(t_address,t_uint256)"
+      },
+      {
+        "astId": 8,
+        "contract": "Lookups.sol:Lookups",
+        "label": "values",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_array(t_uint256)dyn_storage"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_array(t_uint256)dyn_storage": {
+        "base": "t_uint256",
+        "encoding": "dynamic_array",
+        "label": "uint256[]",
+        "numberOfBytes": "32"
+      },
+      "t_mapping(t_address,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_address",
+        "label": "mapping(address => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      }
+    }
+  },
+  "selectors": {
+    "hashBytes(bytes)": "8f9087f5",
+    "listGet(uint256)": "7313f2ab",
+    "mapGet(address)": "ba653676"
+  },
+  "runtime": "608060405234801561001057600080fd5b50600436106100415760003560e01c80637313f2ab146100465780638f9087f51461006b578063ba6536761461007e575b600080fd5b6100596100543660046100f0565b6100a7565b60405190815260200160405180910390f35b610059610079366004610109565b6100ce565b61005961008c36600461017d565b6001600160a01b031660009081526020819052604090205490565b6000600182815481106100bc576100bc6101ad565b90600052602060002001549050919050565b600082826040516100e09291906101c3565b6040518091039020905092915050565b60006020828403121561010257600080fd5b5035919050565b6000806020838503121561011c57600080fd5b823567ffffffffffffffff81111561013357600080fd5b8301601f8101851361014457600080fd5b803567ffffffffffffffff81111561015b57600080fd5b85602082840101111561016d57600080fd5b6020919091019590945092505050565b60006020828403121561018f57600080fd5b81356001600160a01b03811681146101a657600080fd5b9392505050565b634e487b7160e01b600052603260045260246000fd5b818382376000910190815291905056fea164736f6c634300081a000a",
+  "source_map": "155:483:0:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;418:101;;;;;;:::i;:::-;;:::i;:::-;;;345:25:1;;;333:2;318:18;418:101:0;;;;;;;525:111;;;;;;:::i;:::-;;:::i;314:98::-;;;;;;:::i;:::-;-1:-1:-1;;;;;392:13:0;366:7;392:13;;;;;;;;;;;;314:98;418:101;473:7;499:6;506:5;499:13;;;;;;;;:::i;:::-;;;;;;;;;492:20;;418:101;;;:::o;525:111::-;588:7;624:4;;614:15;;;;;;;:::i;:::-;;;;;;;;607:22;;525:111;;;;:::o;14:180:1:-;73:6;126:2;114:9;105:7;101:23;97:32;94:52;;;142:1;139;132:12;94:52;-1:-1:-1;165:23:1;;14:180;-1:-1:-1;14:180:1:o;381:586::-;451:6;459;512:2;500:9;491:7;487:23;483:32;480:52;;;528:1;525;518:12;480:52;568:9;555:23;601:18;593:6;590:30;587:50;;;633:1;630;623:12;587:50;656:22;;709:4;701:13;;697:27;-1:-1:-1;687:55:1;;738:1;735;728:12;687:55;778:2;765:16;804:18;796:6;793:30;790:50;;;836:1;833;826:12;790:50;881:7;876:2;867:6;863:2;859:15;855:24;852:37;849:57;;;902:1;899;892:12;849:57;933:2;925:11;;;;;955:6;;-1:-1:-1;381:586:1;-1:-1:-1;;;381:586:1:o;1154:286::-;1213:6;1266:2;1254:9;1245:7;1241:23;1237:32;1234:52;;;1282:1;1279;1272:12;1234:52;1308:23;;-1:-1:-1;;;;;1360:31:1;;1350:42;;1340:70;;1406:1;1403;1396:12;1340:70;1429:5;1154:286;-1:-1:-1;;;1154:286:1:o;1445:127::-;1506:10;1501:3;1497:20;1494:1;1487:31;1537:4;1534:1;1527:15;1561:4;1558:1;1551:15;1577:271;1760:6;1752;1747:3;1734:33;1716:3;1786:16;;1811:13;;;1786:16;1577:271;-1:-1:-1;1577:271:1:o",
+  "opcodes": "PUSH1 0x80 PUSH1 0x40 MSTORE CALLVALUE DUP1 ISZERO PUSH2 0x10 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP PUSH1 0x4 CALLDATASIZE LT PUSH2 0x41 JUMPI PUSH1 0x0 CALLDATALOAD PUSH1 0xE0 SHR DUP1 PUSH4 0x7313F2AB EQ PUSH2 0x46 JUMPI DUP1 PUSH4 0x8F9087F5 EQ PUSH2 0x6B JUMPI DUP1 PUSH4 0xBA653676 EQ PUSH2 0x7E JUMPI JUMPDEST PUSH1 0x0 DUP1 REVERT JUMPDEST PUSH2 0x59 PUSH2 0x54 CALLDATASIZE PUSH1 0x4 PUSH2 0xF0 JUMP JUMPDEST PUSH2 0xA7 JUMP JUMPDEST PUSH1 0x40 MLOAD SWAP1 DUP2 MSTORE PUSH1 0x20 ADD PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST PUSH2 0x59 PUSH2 0x79 CALLDATASIZE PUSH1 0x4 PUSH2 0x109 JUMP JUMPDEST PUSH2 0xCE JUMP JUMPDEST PUSH2 0x59 PUSH2 0x8C CALLDATASIZE PUSH1 0x4 PUSH2 0x17D JUMP JUMPDEST PUSH1 0x1 PUSH1 0x1 PUSH1 0xA0 SHL SUB AND PUSH1 0x0 SWAP1 DUP2 MSTORE PUSH1 0x20 DUP2 SWAP1 MSTORE PUSH1 0x40 SWAP1 KECCAK256 SLOAD SWAP1 JUMP JUMPDEST PUSH1 0x0 PUSH1 0x1 DUP3 DUP2 SLOAD DUP2 LT PUSH2 0xBC JUMPI PUSH2 0xBC PUSH2 0x1AD JUMP JUMPDEST SWAP1 PUSH1 0x0 MSTORE PUSH1 0x20 PUSH1 0x0 KECCAK256 ADD SLOAD SWAP1 POP SWAP2 SWAP1 POP JUMP JUMPDEST PUSH1 0x0 DUP3 DUP3 PUSH1 0x40 MLOAD PUSH2 0xE0 SWAP3 SWAP2 SWAP1 PUSH2 0x1C3 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 KECCAK256 SWAP1 POP SWAP3 SWAP2 POP POP JUMP JUMPDEST PUSH1 0x0 PUSH1 0x20 DUP3 DUP5 SUB SLT ISZERO PUSH2 0x102 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST POP CALLDATALOAD SWAP2 SWAP1 POP JUMP JUMPDEST PUSH1 0x0 DUP1 PUSH1 0x20 DUP4 DUP6 SUB SLT ISZERO PUSH2 0x11C JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST DUP3 CALLDATALOAD PUSH8 0xFFFFFFFFFFFFFFFF DUP2 GT ISZERO PUSH2 0x133 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST DUP4 ADD PUSH1 0x1F DUP2 ADD DUP6 SGT PUSH2 0x144 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST DUP1 CALLDATALOAD PUSH8 0xFFFFFFFFFFFFFFFF DUP2 GT ISZERO PUSH2 0x15B JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST DUP6 PUSH1 0x20 DUP3 DUP5 ADD ADD GT ISZERO PUSH2 0x16D JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST PUSH1 0x20 SWAP2 SWAP1 SWAP2 ADD SWAP6 SWAP1 SWAP5 POP SWAP3 POP POP POP JUMP JUMPDEST PUSH1 0x0 PUSH1 0x20 DUP3 DUP5 SUB SLT ISZERO PUSH2 0x18F JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST DUP2 CALLDATALOAD PUSH1 0x1 PUSH1 0x1 PUSH1 0xA0 SHL SUB DUP2 AND DUP2 EQ PUSH2 0x1A6 JUMPI PUSH1 0x0 DUP1 REVERT JUMPDEST SWAP4 SWAP3 POP POP POP JUMP JUMPDEST PUSH4 0x4E487B71 PUSH1 0xE0 SHL PUSH1 0x0 MSTORE PUSH1 0x32 PUSH1 0x4 MSTORE PUSH1 0x24 PUSH1 0x0 REVERT JUMPDEST DUP2 DUP4 DUP3 CALLDATACOPY PUSH1 0x0 SWAP2 ADD SWAP1 DUP2 MSTORE SWAP2 SWAP1 POP JUMP INVALID LOG1 PUSH5 0x736F6C6343 STOP ADDMOD BYTE STOP EXP "
+}

@@ -23,6 +23,10 @@ python3 scripts/run.py bench
 
 Optional environment variables: `TVM_CLANG`, `TVM_WASM_LD`, `TVM_ARTIFACTS`, `CARGO_TARGET_DIR`. Generated C++, object files, Wasm and reports go into ignored `artifacts/` by default. Benchmark JSON is `artifacts/report.json`; differential-check evidence is `artifacts/validation.json`.
 
+## Inspect actual generated code
+
+See [the mapping/array/hash walkthrough and signature example](examples/README.md), [Solidity source](examples/Lookups.sol), and [complete generated C++](examples/generated/Lookups.cpp). Rebuild and validate with `python3 scripts/run.py lookups`; regenerate the Solidity fixture with `npm run compile:lookups`.
+
 ## What is compared
 
 - **Reference:** the node's TRON-patched revm interpreter with the extracted Frontier-based TVM Energy schedule, modern 1-Energy MLOAD/MSTORE/MSTORE8, and explicit modern fixture flags. Runtime bytecode analysis is reused across calls.

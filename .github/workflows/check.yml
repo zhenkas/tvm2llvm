@@ -15,6 +15,8 @@ jobs:
       - run: rustup default 1.91.1
       - run: sudo apt-get update && sudo apt-get install -y clang lld
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run compile:fixtures && git diff --exit-code -- fixtures/
+      - run: npm run compile:fixtures && npm run compile:lookups && git diff --exit-code -- fixtures/
       - run: cargo fmt --check --package tvm2llvm
       - run: python3 scripts/run.py check
+      - run: python3 scripts/run.py lookups
+      - run: git diff --exit-code -- examples/generated/

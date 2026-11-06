@@ -1,7 +1,8 @@
 {
   "private": true,
   "scripts": {
-    "compile:fixtures": "node scripts/compile-solidity.cjs"
+    "compile:fixtures": "node scripts/compile-solidity.cjs",
+    "compile:lookups": "node scripts/compile-lookups.cjs"
   },
   "devDependencies": {
     "solc": "0.8.26"

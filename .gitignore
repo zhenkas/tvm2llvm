@@ -3,3 +3,5 @@
 /node_modules/
 *.profraw
 __pycache__/
+/examples/generated/*.wasm
+/examples/generated/*.o
