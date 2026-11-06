@@ -123,13 +123,21 @@ inline void hash_op() {
 ```
 
 `h_keccak` — импорт Wasm из Rust Host. Сам Keccak сейчас выполняется общей native Rust-реализацией.
-Он не переписан в сгенерированный C++; оба движка используют одну реализацию.
+Он не переписан в сгенерированный C++; оба движка используют одну реализацию. Host хеширует проверенный срез Wasm-памяти без временного Vec и копирования; borrow заканчивается до записи результата. [Замеры пути хеширования](../benchmarks/hash-analysis.md) отдельно показывают стоимость обвязки.
 SLOAD аналогично вызывает `h_sload`, обращающийся к in-memory journal/Host.
 
 ```rust
 // src/wasm.rs, обработчик host.keccak
-let data = bytes(&mut c, p, n);
-put(&mut c, v, U256::from_be_bytes(keccak256(data).0));
+let memory = mem(&mut c);
+let start = usize::try_from(p)?;
+let length = usize::try_from(n)?;
+let hash = {
+    let data = memory.data(&c);
+    let input = data.get(start..).and_then(|s| s.get(..length))
+        .ok_or_else(|| anyhow::anyhow!("hash input outside linear memory"))?;
+    U256::from_be_bytes(keccak256(input).0).to_le_bytes::<32>()
+};
+memory.write(&mut c, usize::try_from(v)?, &hash)?;
 ```
 
 Для bytes "hello":

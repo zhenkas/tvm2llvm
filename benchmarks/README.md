@@ -1,5 +1,7 @@
 # Execution baseline — 2026-11-06
 
+This is the starting snapshot at commit90625c8. Its original raw samples/source fingerprints are retained. [Later hash-path analysis and optimization](hash-analysis.md) records current callback measurements.
+
 The reference is the TRON-patched Rust TVM interpreter. The compiled backend specializes the same Solidity runtime bytecode into C++, then executes its freestanding Wasm through Wasmtime. There is one compiler/runtime and no backend-version selector.
 
 Median microseconds per warmed call; lower is better. Native / compiled above 1 means compiled is faster. Three process passes give 27 batch samples per backend/workload/host. Compilation and JIT/instantiation are excluded.

@@ -10,8 +10,8 @@ root = Path(__file__).resolve().parents[1]
 os.chdir(root)
 env = os.environ.copy()
 mode = sys.argv[1] if len(sys.argv) > 1 else "check"
-if mode not in ("check", "bench", "lookups", "boundaries"):
-    raise SystemExit("usage: python3 scripts/run.py [check|bench|lookups|boundaries]")
+if mode not in ("check", "bench", "lookups", "boundaries", "hash"):
+    raise SystemExit("usage: python3 scripts/run.py [check|bench|lookups|boundaries|hash]")
 if env.get("TVM_WASI_SDK") and not env.get("TVM_CLANG"):
     env["TVM_CLANG"] = str(Path(env["TVM_WASI_SDK"]) / "bin" / "clang++")
 if "TVM_WASM_LD" not in env and not shutil.which("wasm-ld"):
@@ -23,8 +23,10 @@ if "TVM_WASM_LD" not in env and not shutil.which("wasm-ld"):
     if not candidate.exists():
         raise SystemExit("Install lld or set TVM_WASM_LD to rust-lld/wasm-ld")
     env["TVM_WASM_LD"] = str(candidate)
-if mode in ("lookups", "boundaries"):
-    example = {"lookups": "inspect-lookups", "boundaries": "check-boundaries"}[mode]
+if mode in ("lookups", "boundaries", "hash"):
+    example = {"lookups": "inspect-lookups", "boundaries": "check-boundaries", "hash": "hash-costs"}[mode]
+    if mode == "hash":
+        env.setdefault("TVM_ARTIFACTS", str(root / "artifacts" / "hash-costs"))
     if mode == "boundaries":
         env.setdefault("TVM_ARTIFACTS", str(root / "artifacts" / "boundaries"))
     subprocess.run(["cargo", "run", "--release", "--locked", "--example", example], env=env, check=True)

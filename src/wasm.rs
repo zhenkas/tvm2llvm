@@ -73,9 +73,22 @@ impl WasmRunner {
         linker.func_wrap(
             "host",
             "keccak",
-            |mut c: Caller<'_, State>, p: i32, n: i32, v: i32| {
-                let data = bytes(&mut c, p, n);
-                put(&mut c, v, U256::from_be_bytes(keccak256(data).0));
+            |mut c: Caller<'_, State>, p: i32, n: i32, v: i32| -> Result<()> {
+                let memory = mem(&mut c);
+                let start = usize::try_from(p)?;
+                let length = usize::try_from(n)?;
+                // Borrow linear memory only during hashing. End the borrow before writing.
+                // This import never re-enters Wasm or grows memory while the slice is live.
+                let hash = {
+                    let data = memory.data(&c);
+                    let input = data
+                        .get(start..)
+                        .and_then(|s| s.get(..length))
+                        .ok_or_else(|| anyhow::anyhow!("hash input outside linear memory"))?;
+                    U256::from_be_bytes(keccak256(input).0).to_le_bytes::<32>()
+                };
+                memory.write(&mut c, usize::try_from(v)?, &hash)?;
+                Ok(())
             },
         )?;
         linker.func_wrap(
