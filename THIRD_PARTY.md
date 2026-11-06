@@ -11,3 +11,7 @@ The specialization approach was informed by the README of [EF/CF evm2cpp](https:
 ## Compiler toolchain
 
 The optional pinned wasi-sdk34 provides LLVM/Clang23.1.0 under Apache-2.0 with LLVM exceptions. Its downloader verifies SHA-256; the SDK remains outside this repository. Contract modules are freestanding and link no libc++abi/libunwind or WASI runtime. Generated object/Wasm files are ignored.
+
+## In-Wasm Keccak diagnostic
+
+The optional benchmarks/wasm-keccak crate compiles RustCrypto sha3/keccak from crates.io as dependencies (MIT OR Apache-2.0). Its own no_std ABI wrapper is original LGPL-3.0-or-later code. No upstream crypto source is copied into this repository; its separate Cargo.lock records source checksums matching the native dependency graph. This diagnostic links no WASI or exception runtime.

@@ -1,6 +1,6 @@
 # Execution baseline — 2026-11-06
 
-This is the starting snapshot at commit90625c8. Its original raw samples/source fingerprints are retained. [Later hash-path analysis and optimization](hash-analysis.md) records current callback measurements.
+This is the starting snapshot at commit90625c8. Its original raw samples/source fingerprints are retained. [Later hash-path analysis and optimization](hash-analysis.md) records current callback measurements. [Keccak inside Wasm](wasm-keccak.md) tests moving the same crypto code into the module.
 
 The reference is the TRON-patched Rust TVM interpreter. The compiled backend specializes the same Solidity runtime bytecode into C++, then executes its freestanding Wasm through Wasmtime. There is one compiler/runtime and no backend-version selector.
 
