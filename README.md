@@ -26,7 +26,11 @@ Generated objects, Wasm and reports go into ignored `artifacts/`; the Lookups wa
 
 ## Baseline and portable measurements
 
-[Baseline results and methodology](benchmarks/README.md), [raw cross-host samples](benchmarks/baseline.json), and [validation counts](benchmarks/validation.json) describe the current compiler. Comparisons are native TVM versus compiled C++/Wasm. The portable harness runs the same Linux executable and contract module on both machines, verifies file hashes and preserves every sample. Earlier implementations and comparisons remain in Git history.
+[Baseline results and methodology](benchmarks/README.md), [raw cross-host samples](benchmarks/baseline.json), and [validation counts](benchmarks/validation.json) capture the initial consolidated baseline at commit90625c8. Current hash-path measurements are reported separately below. Comparisons are native TVM versus compiled C++/Wasm. The portable harness runs the same Linux executable and contract module on both machines, verifies file hashes and preserves every sample. Earlier implementations and comparisons remain in Git history.
+
+## Hash-path analysis
+
+[Controlled hash measurements](benchmarks/hash-analysis.md) separate direct Keccak, a counted empty Wasm import, the actual hash callback, raw TVM opcodes and the Solidity loop. The bridge now borrows linear memory without a temporary Vec/copy; the remaining contract gap is reported explicitly.
 
 ## What is compared
 
