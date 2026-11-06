@@ -16,6 +16,9 @@ use tvm2llvm::{
     wasm::WasmRunner,
 };
 fn compile(code: &[u8], dir: &Path, name: &str) -> Result<compiler::Compilation> {
+    if std::env::var("TVM_VARIANT").as_deref() == Ok("v3") {
+        return tvm2llvm::compiler_v3::compile(code, dir, name);
+    }
     if std::env::var("TVM_VARIANT").as_deref() == Ok("v2") {
         let c = tvm2llvm::compiler_v2::compile(code, dir, name)?;
         Ok(compiler::Compilation {

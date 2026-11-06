@@ -34,3 +34,7 @@ The optimization forces small helpers to inline and uses bounded 64-bit division
 ## Separate v2 experiment
 
 See [v2 comparison](v2-comparison.md) and [raw data](v2-comparison.json): outlined template reservation plus C++ exceptions substantially reduces compilation time but slows the measured workloads. V1 remains the default.
+
+## Separate v3 experiment
+
+[The v3 comparison](v3-comparison.md) batches static checks and removes C++ exceptions. It improves the included normal workloads over v1, reduces Wasm size and compiles faster. [Raw samples](v3-comparison.json) include all three compiled variants and the native interpreter.

@@ -31,6 +31,10 @@ See [the mapping/array/hash walkthrough and signature example](examples/README.m
 
 An opt-in [v2 experiment](experiments/v2/README.md) moves instruction reservation into a `noinline reserve<Op>(cost, inputs, delta)` helper and handles failures with one C++ `try/catch`. V1 remains the default. The comparison uses identical Clang and Wasmtime settings for both variants and includes failure-path costs.
 
+## Separate v3 experiment
+
+[V3](experiments/v3/README.md) batches static Energy and stack checks for straight-line regions, restores inline helpers and uses ordinary error returns without C++ exceptions. GAS, jump destinations and dynamic-cost operations preserve their exact boundaries. [Measurements](benchmarks/v3-comparison.md) compare native TVM and all three compiled variants.
+
 ## What is compared
 
 - **Reference:** the node's TRON-patched revm interpreter with the extracted Frontier-based TVM Energy schedule, modern 1-Energy MLOAD/MSTORE/MSTORE8, and explicit modern fixture flags. Runtime bytecode analysis is reused across calls.

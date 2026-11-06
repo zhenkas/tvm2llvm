@@ -7,3 +7,5 @@ __pycache__/
 /examples/generated/*.o
 /examples/generated-v2/*.wasm
 /examples/generated-v2/*.o
+/examples/generated-v3/*.wasm
+/examples/generated-v3/*.o
