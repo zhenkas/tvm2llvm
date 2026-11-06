@@ -29,3 +29,5 @@ jobs:
       - run: python3 scripts/run.py boundaries-v3
       - run: python3 scripts/run.py lookups-v3
       - run: git diff --exit-code -- examples/generated-v3/
+      - run: cargo build --release --locked --example compare-host
+      - run: python3 -m py_compile scripts/run-host.py scripts/pack-host.py scripts/summarize-hosts.py
