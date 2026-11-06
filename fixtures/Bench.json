@@ -1,0 +1,197 @@
+{
+  "compiler": "0.8.26+commit.8a97fa7a.Emscripten.clang",
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "istanbul",
+    "metadata": {
+      "bytecodeHash": "none"
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.deployedBytecode.object"
+        ]
+      }
+    }
+  },
+  "source_sha256": "c2cdb974c0258fd1ceaf9e965f1c332dd449e39768542df5f6eb22e9243341c8",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "Transfer",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "n",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "x",
+          "type": "uint256"
+        }
+      ],
+      "name": "arithmetic",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "balances",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "x",
+          "type": "uint256"
+        }
+      ],
+      "name": "fail",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "n",
+          "type": "uint256"
+        }
+      ],
+      "name": "gasProbe",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "before_",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "after_",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "n",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "x",
+          "type": "bytes32"
+        }
+      ],
+      "name": "hashLoop",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "seed",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "transfer",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "runtime": "608060405234801561001057600080fd5b506004361061007d5760003560e01c8063425067da1161005b578063425067da146100db5780636cbb5ae3146101035780639556483714610116578063a9059cbb1461013857600080fd5b80630433661514610082578063132e4f3c146100a857806327e235e3146100bb575b600080fd5b610095610090366004610332565b61014b565b6040519081526020015b60405180910390f35b6100956100b6366004610354565b610198565b6100956100c9366004610389565b60006020819052908152604090205481565b6100ee6100e9366004610354565b6101e7565b6040805192835260208301919091520161009f565b610095610111366004610332565b610221565b610136610124366004610354565b33600090815260208190526040902055565b005b6100956101463660046103ab565b61024d565b6000805b8381101561018d57604080516020810185905290810182905260600160408051601f198184030181529190528051602090910120925060010161014f565b508190505b92915050565b6000816000036101dc5760405162461bcd60e51b81526004016101d3906020808252600490820152637a65726f60e01b604082015260600190565b60405180910390fd5b6101928260646103d5565b6000805a91506000805b848110156102095760119091028118906001016101f1565b50806001165a61021991906103f7565b915050915091565b6000805b8381101561018d57600d83901c8184675851f42d4c957f2d0201189250806001019050610225565b336000908152602081905260408120548281101561029c5760405162461bcd60e51b815260206004820152600c60248201526b1a5b9cdd59999a58da595b9d60a21b60448201526064016101d3565b3360009081526020819052604080822085840390556001600160a01b0386168252812080548592906102cf9084906103f7565b90915550506040518381526001600160a01b0385169033907fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef9060200160405180910390a35050506001600160a01b031660009081526020819052604090205490565b6000806040838503121561034557600080fd5b50508035926020909101359150565b60006020828403121561036657600080fd5b5035919050565b80356001600160a01b038116811461038457600080fd5b919050565b60006020828403121561039b57600080fd5b6103a48261036d565b9392505050565b600080604083850312156103be57600080fd5b6103c78361036d565b946020939093013593505050565b6000826103f257634e487b7160e01b600052601260045260246000fd5b500490565b8082018082111561019257634e487b7160e01b600052601160045260246000fdfea164736f6c634300081a000a"
+}

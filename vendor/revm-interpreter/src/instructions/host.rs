@@ -1,0 +1,577 @@
+use crate::{
+    instructions::utility::{IntoAddress, IntoU256},
+    interpreter_types::{InputsTr, InterpreterTypes as ITy, MemoryTr, RuntimeFlag, StackTr},
+    Gas, Host, InstructionExecResult as Result, InstructionResult,
+};
+use context_interface::{host::LoadError, journaled_state::AccountInfoLoad};
+use core::cmp::min;
+use primitives::{
+    hardfork::SpecId::{self, *},
+    Bytes, Log, LogData, B256, BLOCK_HASH_HISTORY, KECCAK_EMPTY, U256,
+};
+
+use crate::InstructionContext as Ictx;
+
+/// Loads an account, handling cold load gas accounting.
+///
+/// Pre-Berlin, `cold_account_additional_cost` is 0, so the cold load logic is a no-op.
+fn load_account<'a, H: Host + ?Sized>(
+    gas: &mut Gas,
+    host: &'a mut H,
+    address: primitives::Address,
+    load_code: bool,
+) -> core::result::Result<AccountInfoLoad<'a>, LoadError> {
+    let cold_load_gas = host.gas_params().cold_account_additional_cost();
+    let skip_cold_load = gas.remaining() < cold_load_gas;
+    let account = host.load_account_info_skip_cold_load(address, load_code, skip_cold_load)?;
+    if account.is_cold && !gas.record_regular_cost(cold_load_gas) {
+        return Err(LoadError::ColdLoadSkipped);
+    }
+    Ok(account)
+}
+
+/// Implements the BALANCE instruction.
+///
+/// Gets the balance of the given account.
+pub fn balance<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    popn_top!([], top, context.interpreter);
+    let address = top.into_address();
+    let account = load_account(&mut context.interpreter.gas, context.host, address, false)?;
+    *top = account.balance;
+    Ok(())
+}
+
+/// EIP-1884: Repricing for trie-size-dependent opcodes
+pub fn selfbalance<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    check!(context.interpreter, ISTANBUL);
+
+    let balance = context
+        .host
+        .balance(context.interpreter.input.target_address())
+        .ok_or(InstructionResult::FatalExternalError)?;
+    push!(context.interpreter, balance.data);
+    Ok(())
+}
+
+/// Implements the EXTCODESIZE instruction.
+///
+/// Gets the size of an account's code.
+pub fn extcodesize<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    popn_top!([], top, context.interpreter);
+    let address = top.into_address();
+    let account = load_account(&mut context.interpreter.gas, context.host, address, true)?;
+    // safe to unwrap because we are loading code
+    let code_len = account.code.as_ref().unwrap().len();
+    // TRON fork: a contract under construction has not deposited its runtime
+    // code yet (java `Program.getCodeAt(self)` is empty during the constructor),
+    // so EXTCODESIZE(address(this)) is 0 — even though our top-level deploy path
+    // pre-installs the init code as the account's `code`. See
+    // `Host::tron_under_construction`.
+    *top = if context.host.tron_under_construction(address) {
+        U256::ZERO
+    } else {
+        U256::from(code_len)
+    };
+    Ok(())
+}
+
+/// EIP-1052: EXTCODEHASH opcode
+pub fn extcodehash<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    check!(context.interpreter, PETERSBURG);
+    popn_top!([], top, context.interpreter);
+    let address = top.into_address();
+    let account = load_account(&mut context.interpreter.gas, context.host, address, false)?;
+    let acct_code_hash = account.code_hash;
+    let acct_is_empty = account.is_empty();
+    // TRON fork: a contract under construction carries no deposited runtime code
+    // yet, so java `Program.getCodeHashAt(self)` returns `sha3("")` (the account
+    // and contract rows exist, but the row's code hash is unset, so it hashes
+    // the empty code). Our top-level deploy pre-installs the init code + its
+    // hash on the account, so without this override EXTCODEHASH would leak the
+    // init-code hash. See `Host::tron_under_construction`.
+    if context.host.tron_under_construction(address) {
+        *top = KECCAK_EMPTY.into_u256();
+        return Ok(());
+    }
+    // TRON keys EXTCODEHASH on store EXISTENCE, not EIP-161 emptiness
+    // (java `Program.getCodeHashAt`): a genuinely-absent account hashes to 0,
+    // but a present account with no code returns KECCAK_EMPTY — which
+    // `basic_ref` already loads as the code_hash of a non-contract row.
+    // revm's `is_empty()` (nonce==0 && balance==0 && code empty) wrongly
+    // collapses a present balance-0 non-contract to 0 because TRON hardcodes
+    // nonce=0 and never prunes accounts. The `!is_empty()` term keeps a
+    // same-tx-created child (held in the journal, not yet committed in the
+    // AccountStore) visible — the factory `extcodehash(child)` case. Mirrors
+    // the ISCONTRACT / CALL-new-account / SELFDESTRUCT existence fixes already
+    // keyed on `tron_account_exists`.
+    let code_hash = if context.host.tron_account_exists(address) || !acct_is_empty {
+        acct_code_hash
+    } else {
+        B256::ZERO
+    };
+    *top = code_hash.into_u256();
+    Ok(())
+}
+
+/// Implements the EXTCODECOPY instruction.
+///
+/// Copies a portion of an account's code to memory.
+pub fn extcodecopy<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    popn!(
+        [address, memory_offset, code_offset, len_u256],
+        context.interpreter
+    );
+    let address = address.into_address();
+
+    let len = as_usize_or_fail!(context.interpreter, len_u256);
+    gas!(
+        context.interpreter,
+        context.host.gas_params().extcodecopy(len)
+    );
+
+    let mut memory_offset_usize = 0;
+    // resize memory only if len is not zero
+    if len != 0 {
+        // fail on casting of memory_offset only if len is not zero.
+        memory_offset_usize = as_usize_or_fail!(context.interpreter, memory_offset);
+        // Resize memory to fit the code
+        context
+            .interpreter
+            .resize_memory(context.host.gas_params(), memory_offset_usize, len)?;
+    }
+
+    let account = load_account(&mut context.interpreter.gas, context.host, address, true)?;
+    let full_code = account.code.as_ref().unwrap().original_bytes();
+    // TRON fork: EXTCODECOPY of a contract under construction copies from empty
+    // code (java `Program.getCodeAt(self)` is empty during the constructor), so
+    // the destination is zero-filled. See `Host::tron_under_construction`.
+    let code = if context.host.tron_under_construction(address) {
+        Bytes::new()
+    } else {
+        full_code
+    };
+
+    let code_offset_usize = min(as_usize_saturated!(code_offset), code.len());
+
+    // Note: This can't panic because we resized memory to fit.
+    // len zero is handled in set_data
+    context
+        .interpreter
+        .memory
+        .set_data(memory_offset_usize, code_offset_usize, len, &code);
+    Ok(())
+}
+
+/// Implements the BLOCKHASH instruction.
+///
+/// Gets the hash of one of the 256 most recent complete blocks.
+pub fn blockhash<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    popn_top!([], number, context.interpreter);
+
+    let requested_number = *number;
+    let block_number = context.host.block_number();
+
+    let Some(diff) = block_number.checked_sub(requested_number) else {
+        *number = U256::ZERO;
+        return Ok(());
+    };
+
+    let diff = as_u64_saturated!(diff);
+
+    // blockhash should push zero if number is same as current block number.
+    if diff == 0 {
+        *number = U256::ZERO;
+        return Ok(());
+    }
+
+    *number = if diff <= BLOCK_HASH_HISTORY {
+        let hash = context
+            .host
+            .block_hash(as_u64_saturated!(requested_number))
+            .ok_or(InstructionResult::FatalExternalError)?;
+        U256::from_be_bytes(hash.0)
+    } else {
+        U256::ZERO
+    };
+    Ok(())
+}
+
+/// Implements the SLOAD instruction.
+///
+/// Loads a word from storage.
+pub fn sload<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    popn_top!([], index, context.interpreter);
+    // TRON fork: gas decisions follow the *gas* spec (Frontier for TRON), not the
+    // opcode spec. Frontier → take the plain (no warm/cold) sload path.
+    let spec_id = context.host.gas_params().spec();
+    let target = context.interpreter.input.target_address();
+
+    if spec_id.is_enabled_in(BERLIN) {
+        let additional_cold_cost = context.host.gas_params().cold_storage_additional_cost();
+        let skip_cold = context.interpreter.gas.remaining() < additional_cold_cost;
+        let storage = context
+            .host
+            .sload_skip_cold_load(target, *index, skip_cold)?;
+        if context.host.tron_take_pending_out_of_time() {
+            return Err(InstructionResult::TronOutOfTime);
+        }
+        if storage.is_cold {
+            gas!(context.interpreter, additional_cold_cost);
+        }
+        *index = storage.data;
+    } else {
+        let storage = context
+            .host
+            .sload(target, *index)
+            .ok_or(InstructionResult::FatalExternalError)?;
+        // TRON fork: java `Storage.checkAlias` threw `OutOfTimeException`.
+        if context.host.tron_take_pending_out_of_time() {
+            return Err(InstructionResult::TronOutOfTime);
+        }
+        *index = storage.data;
+    };
+    Ok(())
+}
+
+/// Implements the SSTORE instruction.
+///
+/// Stores a word to storage.
+pub fn sstore<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    require_non_staticcall!(context.interpreter);
+    popn!([index, value], context.interpreter);
+
+    let target = context.interpreter.input.target_address();
+    // TRON fork: SSTORE metering style, the EIP-2200 stipend sentry and the
+    // warm/cold split all follow the *gas* spec (Frontier for TRON), not the
+    // opcode spec. Frontier → simple SET/CLEAR/RESET, no sentry, no cold cost.
+    let spec_id = context.host.gas_params().spec();
+
+    // EIP-2200: Structured Definitions for Net Gas Metering
+    // If gasleft is less than or equal to gas stipend, fail the current call frame with 'out of gas' exception.
+    if spec_id.is_enabled_in(ISTANBUL)
+        && context.interpreter.gas.remaining() <= context.host.gas_params().call_stipend()
+    {
+        return Err(InstructionResult::ReentrancySentryOOG);
+    }
+
+    gas!(
+        context.interpreter,
+        context.host.gas_params().sstore_static_gas()
+    );
+
+    let state_load = if spec_id.is_enabled_in(BERLIN) {
+        let additional_cold_cost = context.host.gas_params().cold_storage_additional_cost();
+        let skip_cold = context.interpreter.gas.remaining() < additional_cold_cost;
+        context
+            .host
+            .sstore_skip_cold_load(target, index, value, skip_cold)?
+    } else {
+        context
+            .host
+            .sstore(target, index, value)
+            .ok_or(InstructionResult::FatalExternalError)?
+    };
+    // TRON fork: java `Storage.checkAlias` threw `OutOfTimeException`.
+    if context.host.tron_take_pending_out_of_time() {
+        return Err(InstructionResult::TronOutOfTime);
+    }
+
+    let is_istanbul = spec_id.is_enabled_in(ISTANBUL);
+
+    // dynamic gas
+    gas!(
+        context.interpreter,
+        context.host.gas_params().sstore_dynamic_gas(
+            is_istanbul,
+            &state_load.data,
+            state_load.is_cold
+        )
+    );
+
+    // state gas for new slot creation (EIP-8037)
+    if context.host.is_amsterdam_eip8037_enabled() {
+        let cpsb = context.host.cpsb();
+        state_gas!(
+            context.interpreter,
+            context
+                .host
+                .gas_params()
+                .sstore_state_gas(&state_load.data, cpsb)
+        );
+
+        // EIP-8037 issue #2: 0→x→0 storage restoration refills the reservoir
+        // directly rather than routing the state gas through the capped refund
+        // counter. The regular-gas portion of the restoration still flows
+        // through `sstore_refund` below.
+        let refill = context
+            .host
+            .gas_params()
+            .sstore_state_gas_refill(&state_load.data, cpsb);
+        if refill > 0 {
+            context.interpreter.gas.refill_reservoir(refill);
+        }
+    }
+
+    // refund
+    context.interpreter.gas.record_refund(
+        context
+            .host
+            .gas_params()
+            .sstore_refund(is_istanbul, &state_load.data),
+    );
+    Ok(())
+}
+
+/// EIP-1153: Transient storage opcodes
+/// Store value to transient storage
+pub fn tstore<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    check!(context.interpreter, CANCUN);
+    require_non_staticcall!(context.interpreter);
+    popn!([index, value], context.interpreter);
+
+    context
+        .host
+        .tstore(context.interpreter.input.target_address(), index, value);
+    Ok(())
+}
+
+/// EIP-1153: Transient storage opcodes
+/// Load value from transient storage
+pub fn tload<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    check!(context.interpreter, CANCUN);
+    popn_top!([], index, context.interpreter);
+
+    *index = context
+        .host
+        .tload(context.interpreter.input.target_address(), *index);
+    Ok(())
+}
+
+/// Implements the LOG0-LOG4 instructions.
+///
+/// Appends log record with N topics.
+pub fn log<const N: usize, H: Host + ?Sized>(context: Ictx<'_, H, impl ITy>) -> Result {
+    require_non_staticcall!(context.interpreter);
+
+    popn!([offset, len], context.interpreter);
+    let len = as_usize_or_fail!(context.interpreter, len);
+    gas!(
+        context.interpreter,
+        context.host.gas_params().log_cost(N as u8, len as u64)
+    );
+    let data = if len == 0 {
+        Bytes::new()
+    } else {
+        let offset = as_usize_or_fail!(context.interpreter, offset);
+        // Resize memory to fit the data
+        context
+            .interpreter
+            .resize_memory(context.host.gas_params(), offset, len)?;
+        Bytes::copy_from_slice(context.interpreter.memory.slice_len(offset, len).as_ref())
+    };
+    let Some(topics) = context.interpreter.stack.popn::<N>() else {
+        return Err(InstructionResult::StackUnderflow);
+    };
+
+    let log = Log {
+        address: context.interpreter.input.target_address(),
+        data: LogData::new(topics.into_iter().map(B256::from).collect(), data)
+            .expect("LogData should have <=4 topics"),
+    };
+
+    context.host.log(log);
+    Ok(())
+}
+
+/// Implements the SELFDESTRUCT instruction.
+///
+/// Halt execution and register account for later deletion.
+pub fn selfdestruct<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    require_non_staticcall!(context.interpreter);
+    popn!([target], context.interpreter);
+    let target = target.into_address();
+    // TRON fork: the new-account topup / cold rules follow the *gas* spec
+    // (Frontier for TRON), not the opcode spec.
+    let spec = context.host.gas_params().spec();
+
+    let cold_load_gas = context.host.gas_params().selfdestruct_cold_cost();
+
+    let skip_cold_load = context.interpreter.gas.remaining() < cold_load_gas;
+    let res = context.host.selfdestruct(
+        context.interpreter.input.target_address(),
+        target,
+        skip_cold_load,
+    )?;
+
+    // EIP-161: State trie clearing (invariant-preserving alternative)
+    let should_charge_topup = if spec.is_enabled_in(SpecId::SPURIOUS_DRAGON) {
+        res.had_value && !res.target_exists
+    } else {
+        !res.target_exists
+    };
+
+    gas!(
+        context.interpreter,
+        context
+            .host
+            .gas_params()
+            .selfdestruct_cost(should_charge_topup, res.is_cold)
+    );
+
+    // State gas for new account creation (EIP-8037)
+    if context.host.is_amsterdam_eip8037_enabled() && should_charge_topup {
+        state_gas!(
+            context.interpreter,
+            context
+                .host
+                .gas_params()
+                .new_account_state_gas(context.host.cpsb())
+        );
+    }
+
+    if !res.previously_destroyed {
+        context
+            .interpreter
+            .gas
+            .record_refund(context.host.gas_params().selfdestruct_refund());
+    }
+
+    Err(InstructionResult::SelfDestruct)
+}
+
+/// TRON SELFDESTRUCT (0xff) -- java-tron `suicideAction` / `suicideAction2`.
+///
+/// On top of the standard journal selfdestruct (which already follows the
+/// proposal-#94 destroy rule and the burn-account redirect via the TRON
+/// journal cfg), this:
+///
+/// 1. Validates `canSuicide` / `canSuicide2` via `Host::tron_suicide`
+///    -- outstanding delegations REVERT the frame (java sets revert and
+///    stops; gas charged so far is kept, the rest refunded).
+/// 2. Applies the TRON chainbase side-effects (reward settlement + vote
+///    cancellation, TRC-10 sweep, frozen v1/v2 transfer, expired-unfreeze
+///    credit) BEFORE the journal moves the TRX balance, mirroring
+///    java-tron's ordering inside `Program.suicide` (the allowance fold
+///    must land before the balance is read).
+/// 3. Charges `SUICIDE_V2` (5000) base energy when the restriction
+///    proposal is active (java `EnergyCost.getSuicideCost3`); the
+///    pre-#94 base stays 0 via the Frontier-pinned table.
+pub fn tron_selfdestruct<IT: ITy, H: Host + ?Sized>(context: Ictx<'_, H, IT>) -> Result {
+    require_non_staticcall!(context.interpreter);
+    popn!([target], context.interpreter);
+    let target = target.into_address();
+    let owner = context.interpreter.input.target_address();
+
+    // java charges ALL of SELFDESTRUCT's energy in `op.getEnergyCost`
+    // (`VM.play` line 56) BEFORE `op.execute` runs the suicide. The
+    // `NEW_ACCT_CALL` (25000) top-up in `EnergyCost.getSuicideCost3` keys on
+    // `isDeadAccount(inheritor)` — store NON-EXISTENCE
+    // (`getContractState().getAccount(target) == null`), with NO value gating
+    // — evaluated on the PRE-suicide state (the stack is peeked, nothing has
+    // executed yet). We therefore snapshot existence here, before
+    // `tron_suicide` runs `createAccountIfNotExist` for the inheritor (which
+    // would otherwise make every beneficiary "exist" by the time we check).
+    //
+    // Keying on the chainbase store (java's model) rather than `res.target_
+    // exists` is also required: the journal computes `target_exists` via
+    // EIP-161 emptiness under the modern *opcode* spec (CANCUN under the
+    // restriction proposal → `is_empty()`), which over-charges 25000 for a
+    // SELFDESTRUCT whose beneficiary is an existing-but-empty account — TRON
+    // never prunes accounts, so a zero-balance row is alive. Mirrors the
+    // CALL-site fix in `call_helpers.rs`. The default `tron_account_exists`
+    // returns `false` (no TRON store), preserving upstream EVM behaviour.
+    //
+    // Use the JOURNAL-AWARE variant: java's `isDeadAccount` reads the in-flight
+    // Repository, so an inheritor CREATED earlier in this same tx (a factory
+    // CREATEs child B then SELFDESTRUCTs to B) is visible and NOT dead — no
+    // 25000 NEW_ACCT_CALL top-up. The committed-only `tron_account_exists`
+    // missed the same-tx-created set.
+    let target_is_dead = !context.host.tron_account_exists_or_created(target);
+
+    // java `EnergyCost.getSuicideCost3`: SUICIDE_V2 = 5000 base under the
+    // restriction proposal (pre-#94 SUICIDE = 0), plus the dead-account
+    // top-up. The whole charge lands before any state mutation.
+    let restriction = context.host.tron_selfdestruct_restriction();
+    if restriction {
+        gas!(context.interpreter, 5000);
+    }
+    // The dead-beneficiary NEW_ACCT_CALL (25000) top-up exists only from #81
+    // (`getSuicideCost2`) / #94 (`getSuicideCost3`); pre-#81 SUICIDE has no
+    // top-up (`getSuicideCost` = 0). #94 implies #81, so gate on either.
+    let charge_topup =
+        target_is_dead && (context.host.tron_allow_energy_adjustment() || restriction);
+    let cold_load_gas = context.host.gas_params().selfdestruct_cold_cost();
+    gas!(
+        context.interpreter,
+        context
+            .host
+            .gas_params()
+            .selfdestruct_cost(charge_topup, false)
+    );
+
+    // java `Program.suicide2` opens with the beneficiary check
+    // (`MUtil.checkCPUTimeForSelfDestructedBeneficiary`, VERSION_4_8_2_2).
+    if restriction
+        && context.host.tron_fork_4_8_2_2()
+        && context.host.tron_is_selfdestructed(target)
+    {
+        return Err(InstructionResult::TronOutOfTime);
+    }
+
+    let created_locally = context.host.tron_account_created_locally(owner);
+    let will_destroy = created_locally || !restriction;
+
+    // The dying contract's IN-FLIGHT TRX balance. java reads it from the live
+    // `Repository` (`getContractState().getBalance(owner)`), so it includes
+    // credits made earlier in this same transaction; the journal — not the
+    // account store — is authoritative for it here. It decides which of java's
+    // three pre-ALLOW_TVM_SOLIDITY_059 sub-cases applies when the obtainer has
+    // no account row, because `MUtil.transfer` returns early at amount 0 and so
+    // never reaches the validation that rejects an absent recipient.
+    let owner_balance = context
+        .host
+        .balance(owner)
+        .map(|b| i64::try_from(b.data).unwrap_or(i64::MAX))
+        .unwrap_or(0);
+
+    // Chainbase side-effects + canSuicide validation, run in java's order
+    // (`OperationActions.suicideAction` validates BEFORE calling
+    // `Program.suicide`, so a `canSuicide` failure wins over any transfer
+    // failure below).
+    match context
+        .host
+        .tron_suicide(owner, target, will_destroy, owner_balance)
+    {
+        // java: `program.getResult().setRevert(); program.stop()`.
+        -1 => return Err(InstructionResult::Revert),
+        // java threw a `TransferException` out of `MUtil.transfer`. `VM.play`
+        // catches it for THIS frame, spend-all-exempt, and the caller pushes
+        // zero and continues. Only a root-frame throw reaches the receipt, as
+        // TRANSFER_FAILED with consumed-only energy.
+        -2 => return Err(InstructionResult::TransferFailed),
+        // java threw a `BytecodeExecutionException`, or NPEd inside
+        // `MUtil.transferAllToken`. `VM.play` catches it for THIS frame: the
+        // frame spends all its energy and halts, and the caller pushes zero and
+        // continues. Only a root-frame throw reaches the receipt, as UNKNOWN.
+        -3 => return Err(InstructionResult::TronBytecodeExecution),
+        _ => {}
+    }
+
+    // java `Repository.markSelfDestruct(owner)` at the end of every
+    // successful `suicide` / `suicide2` path.
+    context.host.tron_mark_selfdestructed(owner);
+
+    // Standard journal selfdestruct -- destroy/no-op/transfer per the
+    // (overridden) 6780 rule, burn-account redirect for self-target.
+    let skip_cold_load = context.interpreter.gas.remaining() < cold_load_gas;
+    let res = context.host.selfdestruct(owner, target, skip_cold_load)?;
+
+    if !res.previously_destroyed {
+        context
+            .interpreter
+            .gas
+            .record_refund(context.host.gas_params().selfdestruct_refund());
+    }
+
+    Err(InstructionResult::SelfDestruct)
+}

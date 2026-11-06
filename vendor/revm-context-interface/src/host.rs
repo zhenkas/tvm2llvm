@@ -1,0 +1,835 @@
+//! Host interface for external blockchain state access.
+
+use crate::{
+    cfg::GasParams,
+    context::{SStoreResult, SelfDestructResult, StateLoad},
+    journaled_state::{AccountInfoLoad, AccountLoad},
+};
+use auto_impl::auto_impl;
+use primitives::{hardfork::SpecId, Address, Bytes, Log, StorageKey, StorageValue, B256, U256};
+use state::Bytecode;
+
+/// TRON caps call/create nesting at java-tron's `Program.MAX_DEPTH` (64), not
+/// the EVM's `CALL_STACK_LIMIT` of 1024. A frame deeper than this fails with
+/// `CallTooDeep` (the caller pushes 0 and continues), matching java's
+/// `getCallDeep() == MAX_DEPTH` refusal. The entry frame is depth 0, so the
+/// deepest executing frame is depth 64.
+pub const TRON_MAX_CALL_DEPTH: usize = 64;
+
+/// Error that can happen when loading account info.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum LoadError {
+    /// Cold load skipped.
+    ColdLoadSkipped,
+    /// Database error.
+    DBError,
+}
+
+/// Host trait with all methods that are needed by the Interpreter.
+///
+/// This trait is implemented for all types that have `ContextTr` trait.
+///
+/// There are few groups of functions which are Block, Transaction, Config, Database and Journal functions.
+#[auto_impl(&mut, Box)]
+pub trait Host {
+    /* Block */
+
+    /// Block basefee, calls ContextTr::block().basefee()
+    fn basefee(&self) -> U256;
+    /// Block blob gasprice, calls `ContextTr::block().blob_gasprice()`
+    fn blob_gasprice(&self) -> U256;
+    /// Block gas limit, calls ContextTr::block().gas_limit()
+    fn gas_limit(&self) -> U256;
+    /// Block difficulty, calls ContextTr::block().difficulty()
+    fn difficulty(&self) -> U256;
+    /// Block prevrandao, calls ContextTr::block().prevrandao()
+    fn prevrandao(&self) -> Option<U256>;
+    /// Block number, calls ContextTr::block().number()
+    fn block_number(&self) -> U256;
+    /// Block timestamp, calls ContextTr::block().timestamp()
+    fn timestamp(&self) -> U256;
+    /// Block beneficiary, calls ContextTr::block().beneficiary()
+    fn beneficiary(&self) -> Address;
+    /// Block slot number, calls ContextTr::block().slot_num()
+    fn slot_num(&self) -> U256;
+    /// Chain id, calls ContextTr::cfg().chain_id()
+    fn chain_id(&self) -> U256;
+
+    /* Transaction */
+
+    /// Transaction effective gas price, calls `ContextTr::tx().effective_gas_price(basefee as u128)`
+    fn effective_gas_price(&self) -> U256;
+    /// Transaction caller, calls `ContextTr::tx().caller()`
+    fn caller(&self) -> Address;
+    /// Transaction blob hash, calls `ContextTr::tx().blob_hash(number)`
+    fn blob_hash(&self, number: usize) -> Option<U256>;
+
+    /* Config */
+
+    /// Max initcode size, calls `ContextTr::cfg().max_code_size().saturating_mul(2)`
+    fn max_initcode_size(&self) -> usize;
+
+    /// Gas params contains the dynamic gas constants for the EVM.
+    fn gas_params(&self) -> &GasParams;
+
+    /// Returns whether state gas (EIP-8037) is enabled.
+    fn is_amsterdam_eip8037_enabled(&self) -> bool;
+
+    /// Returns the EIP-8037 `cost_per_state_byte` for the current transaction.
+    ///
+    /// Reads the cached value set on the local context at transaction start
+    /// (via `cfg.cpsb()`, honoring `cpsb_override`). Returns
+    /// `0` when EIP-8037 is not enabled.
+    fn cpsb(&self) -> u64;
+
+    /* Database */
+
+    /// Block hash, calls `ContextTr::journal_mut().db().block_hash(number)`
+    fn block_hash(&mut self, number: u64) -> Option<B256>;
+
+    /* Journal */
+
+    /// Selfdestruct account, calls `ContextTr::journal_mut().selfdestruct(address, target)`
+    fn selfdestruct(
+        &mut self,
+        address: Address,
+        target: Address,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<SelfDestructResult>, LoadError>;
+
+    /// Log, calls `ContextTr::journal_mut().log(log)`
+    fn log(&mut self, log: Log);
+
+    /// Sstore with optional fetch from database. Return none if the value is cold or if there is db error.
+    fn sstore_skip_cold_load(
+        &mut self,
+        address: Address,
+        key: StorageKey,
+        value: StorageValue,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<SStoreResult>, LoadError>;
+
+    /// Sstore, calls `ContextTr::journal_mut().sstore(address, key, value)`
+    fn sstore(
+        &mut self,
+        address: Address,
+        key: StorageKey,
+        value: StorageValue,
+    ) -> Option<StateLoad<SStoreResult>> {
+        self.sstore_skip_cold_load(address, key, value, false).ok()
+    }
+
+    /// Sload with optional fetch from database. Return none if the value is cold or if there is db error.
+    fn sload_skip_cold_load(
+        &mut self,
+        address: Address,
+        key: StorageKey,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<StorageValue>, LoadError>;
+
+    /// Sload, calls `ContextTr::journal_mut().sload(address, key)`
+    fn sload(&mut self, address: Address, key: StorageKey) -> Option<StateLoad<StorageValue>> {
+        self.sload_skip_cold_load(address, key, false).ok()
+    }
+
+    /// Tstore, calls `ContextTr::journal_mut().tstore(address, key, value)`
+    fn tstore(&mut self, address: Address, key: StorageKey, value: StorageValue);
+
+    /// Tload, calls `ContextTr::journal_mut().tload(address, key)`
+    fn tload(&mut self, address: Address, key: StorageKey) -> StorageValue;
+
+    /// Main function to load account info.
+    ///
+    /// If load_code is true, it will load the code fetching it from the database if not done before.
+    ///
+    /// If skip_cold_load is true, it will not load the account if it is cold. This is needed to short circuit
+    /// the load if there is not enough gas.
+    ///
+    /// Returns AccountInfo, is_cold and is_empty.
+    fn load_account_info_skip_cold_load(
+        &mut self,
+        address: Address,
+        load_code: bool,
+        skip_cold_load: bool,
+    ) -> Result<AccountInfoLoad<'_>, LoadError>;
+
+    /// Balance, calls `ContextTr::journal_mut().load_account(address)`
+    #[inline]
+    fn balance(&mut self, address: Address) -> Option<StateLoad<U256>> {
+        self.load_account_info_skip_cold_load(address, false, false)
+            .ok()
+            .map(|load| load.into_state_load(|i| i.balance))
+    }
+
+    /// Load account delegated, calls `ContextTr::journal_mut().load_account_delegated(address)`
+    #[inline]
+    fn load_account_delegated(&mut self, address: Address) -> Option<StateLoad<AccountLoad>> {
+        let account = self
+            .load_account_info_skip_cold_load(address, true, false)
+            .ok()?;
+
+        let mut account_load = StateLoad::new(
+            AccountLoad {
+                is_delegate_account_cold: None,
+                is_empty: account.is_empty,
+            },
+            account.is_cold,
+        );
+
+        // load delegate code if account is EIP-7702
+        if let Some(address) = account.code.as_ref().and_then(Bytecode::eip7702_address) {
+            let delegate_account = self
+                .load_account_info_skip_cold_load(address, true, false)
+                .ok()?;
+            account_load.data.is_delegate_account_cold = Some(delegate_account.is_cold);
+            account_load.data.is_empty = delegate_account.is_empty;
+        }
+
+        Some(account_load)
+    }
+
+    /// Load account code, calls [`Host::load_account_info_skip_cold_load`] with `load_code` set to false.
+    #[inline]
+    fn load_account_code(&mut self, address: Address) -> Option<StateLoad<Bytes>> {
+        self.load_account_info_skip_cold_load(address, true, false)
+            .ok()
+            .map(|load| {
+                load.into_state_load(|i| {
+                    i.code
+                        .as_ref()
+                        .map(|b| b.original_bytes())
+                        .unwrap_or_default()
+                })
+            })
+    }
+
+    /// Load account code hash, calls [`Host::load_account_info_skip_cold_load`] with `load_code` set to false.
+    #[inline]
+    fn load_account_code_hash(&mut self, address: Address) -> Option<StateLoad<B256>> {
+        self.load_account_info_skip_cold_load(address, false, false)
+            .ok()
+            .map(|load| {
+                load.into_state_load(|i| {
+                    if i.is_empty() {
+                        B256::ZERO
+                    } else {
+                        i.code_hash
+                    }
+                })
+            })
+    }
+
+    // ====================================================================
+    // TRON fork extension methods.
+    //
+    // Defaults return 0/false so a plain Ethereum Host doesn't have to
+    // implement TRON semantics. The orphan rule blocks `tron-tvm` from
+    // adding a Context override (Context lives in revm-context, not in
+    // our fork — see `tron-tvm/src/tron_host.rs` for the trait+ext
+    // infrastructure that's ready to plug in once either revm-context
+    // is forked or a TronContext newtype is introduced).
+    //
+    // Today, every Host-read TRON opcode (TOKENBALANCE, ISCONTRACT,
+    // FREEZEEXPIRETIME, and the 10 newly-added stake opcodes' read
+    // sides if any) returns the default. CALLTOKEN-family writes work
+    // because Trc10Inspector intercepts at the frame level.
+    // ====================================================================
+
+    /// TRC-10 token balance of `address` for `token_id`. Default: 0.
+    #[inline]
+    /// TRON fork: is the `ALLOW_TVM_SELFDESTRUCT_RESTRICTION` proposal
+    /// (#94 / TIP-6780) active? Drives the custom SELFDESTRUCT
+    /// instruction's gas and destroy semantics.
+    fn tron_selfdestruct_restriction(&self) -> bool {
+        false
+    }
+
+    #[inline]
+    /// TRON fork: should SELFDESTRUCT charge the dead-beneficiary `NEW_ACCT_CALL`
+    /// (25000) energy top-up? Gated on `ALLOW_ENERGY_ADJUSTMENT` (#81): java's
+    /// `getSuicideCost` has no top-up pre-#81, `getSuicideCost2`/`3` add it
+    /// after. Default `true` preserves upstream (always-charge) behavior.
+    fn tron_allow_energy_adjustment(&self) -> bool {
+        true
+    }
+
+    #[inline]
+    /// TRON fork: the value the `CHAINID` opcode pushes. java `Program.getChainId`
+    /// returns the genesis block id truncated to its last 4 bytes once
+    /// `ALLOW_TVM_COMPATIBLE_EVM` (#60) / `ALLOW_OPTIMIZED_RETURN_VALUE_OF_CHAIN_ID`
+    /// (#71) is active, but the FULL 32-byte genesis id in the Istanbul..#60
+    /// window. Defaults to the standard `chain_id()` for non-TRON hosts.
+    fn tron_chain_id_word(&self) -> U256 {
+        self.chain_id()
+    }
+
+    /// TRON fork: was `address` created in the CURRENT transaction
+    /// (java-tron `Repository.isNewContract`)? Used by the SELFDESTRUCT
+    /// restriction to decide destroy-vs-transfer.
+    fn tron_account_created_locally(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// TRON fork: record that the ROOT frame raised a `TransferException`
+    /// (transfer/endowment/self-transfer validation failure). Set by the
+    /// executor at the root-return boundary, not by the opcode handler, because
+    /// `RuntimeImpl.setResultCode` reads the exception off the root
+    /// `ProgramResult` alone and a nested `TransferException` is contained to
+    /// its own frame. Read by the executor to surface `contractResult
+    /// TRANSFER_FAILED`. Default no-op.
+    fn tron_mark_transfer_failed(&mut self) {}
+
+    /// TRON fork: `ForkController.pass(VERSION_4_8_2_2)` — the Stake-2.0 /
+    /// SELFDESTRUCT deterministic OutOfTime rules are live.
+    fn tron_fork_4_8_2_2(&self) -> bool {
+        false
+    }
+
+    /// TRON fork: java `Repository.isSelfDestructed(address)`.
+    fn tron_is_selfdestructed(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// TRON fork: java `Repository.markSelfDestruct(address)`.
+    fn tron_mark_selfdestructed(&mut self, _address: Address) {}
+
+    /// TRON fork: did the last storage access raise java's deterministic
+    /// `OutOfTimeException`? Clears the flag.
+    fn tron_take_pending_out_of_time(&mut self) -> bool {
+        false
+    }
+
+    /// TRON fork: record that an operation raised a plain
+    /// `BytecodeExecutionException` — java's non-`TransferException` failure
+    /// flavour, which `VMActuator` follows with `spendAllEnergy()` and
+    /// `RuntimeImpl.setResultCode` maps to `contractResult UNKNOWN`. Set by an
+    /// opcode handler before returning a spend-all halt result; read by the
+    /// executor to relabel the halt. Default no-op.
+
+    /// TRON fork: SELFDESTRUCT chainbase side-effects (see
+    /// `TronDatabaseExt::tron_suicide`). `owner_balance` is the dying
+    /// contract's IN-FLIGHT TRX balance (java reads it from the live
+    /// `Repository`, so it includes credits made earlier in this same
+    /// transaction); the journal — not the account store — is authoritative
+    /// for it.
+    ///
+    /// Return codes:
+    /// * `0` — applied.
+    /// * `-1` — `canSuicide`/`canSuicide2` rejected the destroy; the frame
+    ///   reverts (java `program.getResult().setRevert()`).
+    /// * `-2` — java threw a `TransferException` out of `MUtil.transfer`; the
+    ///   whole transaction fails as `TRANSFER_FAILED` with consumed-only
+    ///   energy. Nothing was written.
+    /// * `-3` — java threw a `BytecodeExecutionException` (or NPEd inside
+    ///   `MUtil.transferAllToken`); the whole transaction fails as `UNKNOWN`
+    ///   with all energy spent. Nothing was written.
+    fn tron_suicide(
+        &mut self,
+        _owner: Address,
+        _obtainer: Address,
+        _will_destroy: bool,
+        _owner_balance: i64,
+    ) -> i64 {
+        0
+    }
+
+    /// TRON fork: TRC-10 token balance of `address` for `token_id` (the
+    /// `tokenbalance(trcToken)` extension opcode). Default: `0`.
+    fn tron_token_balance(&self, _address: Address, _token_id: i64) -> i64 {
+        0
+    }
+
+    /// `true` if `address` has any deployed bytecode. Default: false.
+    #[inline]
+    fn tron_is_contract(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// **TRON fork** — `true` if `address` already exists in the account
+    /// store (java `Repository.getAccount(addr) != null`, i.e. NOT
+    /// `isDeadAccount`). TRON never prunes empty accounts, so an existing
+    /// account with a zero balance is still alive and a value-bearing CALL to
+    /// it must NOT pay `NEW_ACCT_CALL` — unlike EIP-161 `is_empty`, which would.
+    /// Default `false` (no TRON store) preserves upstream EVM behaviour: the
+    /// new-account cost then follows the EIP-161 `is_empty` test at the call
+    /// site.
+    #[inline]
+    fn tron_account_exists(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// **TRON fork** — like [`Host::tron_account_exists`] but JOURNAL-AWARE:
+    /// also `true` when the account was CREATED earlier in this same tx (held
+    /// in the host's pending-created set, not yet committed to the AccountStore).
+    /// java's `isDeadAccount` reads the in-flight Repository
+    /// (`getContractState().getAccount`), so a same-tx-created inheritor /
+    /// receiver is visible. Used by SELFDESTRUCT / FREEZE dead-account
+    /// surcharges so a same-tx child is not wrongly charged `NEW_ACCT_CALL`.
+    /// Default delegates to the committed-only check.
+    #[inline]
+    fn tron_account_exists_or_created(&self, address: Address) -> bool {
+        self.tron_account_exists(address)
+    }
+
+    /// **TRON fork** — `true` while `address` is a contract whose constructor
+    /// is still running and whose runtime code has not yet been deposited, so
+    /// EXTCODESIZE / EXTCODEHASH / EXTCODECOPY on it must observe EMPTY code.
+    ///
+    /// java `Program.getCodeAt` reads `invoke.getDeposit().getCode(addr)`, and
+    /// `VMActuator.create` deposits the runtime code (`rootRepository.saveCode`)
+    /// only AFTER the constructor returns — so during construction `getCode` is
+    /// null and `getCodeAt` returns empty (post-`ALLOW_TVM_CONSTANTINOPLE`).
+    /// EXTCODESIZE is then 0, EXTCODECOPY copies from empty, and EXTCODEHASH is
+    /// `sha3("")` (the contract row exists but carries no code hash yet, so
+    /// `getCodeHashAt` falls through to hashing the empty code).
+    ///
+    /// Our top-level `CreateSmartContract` deploy runs as a CALL to an account
+    /// pre-installed with the init bytecode as its `code`, which would otherwise
+    /// make these opcodes report the init code; this signal restores java's
+    /// empty-during-construction view. Nested CREATE/CREATE2 children already
+    /// read empty (revm gives the constructing account no code until its init
+    /// returns), so this stays `false` for them. Default `false`.
+    #[inline]
+    fn tron_under_construction(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is `address` dispatched by java-tron's
+    /// `PrecompiledContracts.getContractForAddress` under the active proposal
+    /// set?
+    ///
+    /// This is the test `OperationActions.exeCall`
+    /// (`OperationActions.java:1033-1041`) uses to choose
+    /// `Program.callToPrecompiledAddress` over `Program.callToAddress`, and the
+    /// two methods differ in their transfer handling: only `callToAddress`
+    /// reaches `createAccountIfNotExist`, and only it wraps the endowment read
+    /// and the transfer validation in a `TransferException`-producing catch.
+    ///
+    /// Membership is proposal-dependent (ALLOW_TVM_SOLIDITY_059 /
+    /// ALLOW_SHIELDED_TRC20_TRANSACTION / ALLOW_TVM_VOTE /
+    /// ALLOW_TVM_COMPATIBLE_EVM / ALLOW_TVM_FREEZE_V2); 0x01..0x08 are ungated.
+    /// Default `false` (no TRON store) leaves upstream EVM hosts unchanged.
+    #[inline]
+    fn tron_is_precompile(&self, _address: Address) -> bool {
+        false
+    }
+
+    /// **TRON fork** — would a child frame launched from the executing frame
+    /// exceed java-tron's `Program.MAX_DEPTH` ([`TRON_MAX_CALL_DEPTH`])?
+    ///
+    /// java checks `getCallDeep() == MAX_DEPTH` at the TOP of
+    /// `Program.callToAddress` (Program.java:1002) and `Program.createContract`
+    /// (Program.java:799) — before the endowment read, before `checkTokenId`,
+    /// and before every transfer validation — and answers it by pushing zero
+    /// and refunding the forwarded energy rather than by throwing. Our depth
+    /// refusal lives downstream in frame construction, so an opcode handler
+    /// that raises a transaction-fatal transfer failure must consult this first
+    /// or it will fire in a situation where java had already returned.
+    ///
+    /// Non-TRON hosts never exhaust this limit; default `false`.
+    #[inline]
+    fn tron_call_depth_exhausted(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — `true` when running under the TRON VM (the real
+    /// chainbase-backed Context). Used by the shared CALL opcode path to
+    /// gate TRON-only semantics that diverge from upstream EVM — e.g.
+    /// java-tron forbids a value/token transfer to oneself
+    /// (`VMUtils.validateForSmartContract` throws "Cannot transfer … to
+    /// yourself"), whereas upstream EVM treats a `from == to` self-transfer
+    /// as a legal no-op. Default `false` keeps DummyHost / Ethereum-only
+    /// setups on the upstream behaviour.
+    #[inline]
+    fn tron_enabled(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — per-contract dynamic-energy factor. Read once
+    /// at frame setup; the interpreter's `Gas` tracker multiplies every
+    /// charge by `(10_000 + factor) / 10_000`. Default `0` = no penalty.
+    #[inline]
+    fn tron_dynamic_energy_factor(&self, _address: Address) -> i64 {
+        0
+    }
+
+    /// **TRON fork** — the deployed `SmartContract.version` of the contract
+    /// at `address` (java `ContractCapsule.getContractVersion()`), or `0`
+    /// when there is no contract row. Read once when a CALL frame is built
+    /// so the frame can carry the executing contract's version — java-tron
+    /// gates the EIP-150 1/64 gas retention (`Program.getCallEnergy` /
+    /// `getCreateEnergy`) AND the GASPRICE push (`gasPriceAction`) on
+    /// `allowTvmCompatibleEvm() && getContractVersion() == 1`. Default `0`
+    /// keeps non-TRON hosts on the upstream "always retain" behaviour.
+    #[inline]
+    fn tron_contract_version(&self, _address: Address) -> i32 {
+        0
+    }
+
+    /// **TRON fork** — is the `ALLOW_TVM_VOTE` proposal active? java gates the
+    /// FREEZE/UNFREEZE (0xd5/0xd6, Stake 1.0) static-call guard on
+    /// `VMConfig.allowTvmVote()` (`OperationActions.java:781,800`), unlike the
+    /// Stake 2.0 / vote / withdraw opcodes whose guard is unconditional.
+    /// Default `false`.
+    #[inline]
+    fn tron_allow_tvm_vote(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is the `ALLOW_MULTI_SIGN` proposal (#20) active?
+    /// java `VMConfig.allowMultiSign()`. Gates CALLTOKEN/TOKENBALANCE tokenId
+    /// range validation (`checkTokenId` / `checkTokenIdInTokenBalance`) and the
+    /// `isTokenTransferMsg` path. Default `false`.
+    #[inline]
+    fn tron_allow_multi_sign(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is the `ALLOW_TVM_SOLIDITY_059` proposal (#32) active?
+    /// java `VMConfig.allowTvmSolidity059()`. Gates
+    /// `Program.createAccountIfNotExist`: only once this proposal is active may
+    /// a contract create the recipient of a value/TRC-10 transfer. Before it,
+    /// `VMUtils.validateForSmartContract` rejects a transfer to an account with
+    /// no store row ("no ToAccount. And not allowed to create an account in a
+    /// smartContract"). Default `false`.
+    #[inline]
+    fn tron_allow_tvm_solidity_059(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is the `ALLOW_TVM_CONSTANTINOPLE` proposal (#26) active?
+    /// java `VMConfig.allowTvmConstantinople()`. Selects the failure flavour
+    /// when a transfer validation fails: with the proposal active java wraps the
+    /// `ContractValidateException` in a `TransferException` (consumed-only
+    /// energy, `contractResult TRANSFER_FAILED`); before it, a plain
+    /// `BytecodeExecutionException` (all energy spent, `contractResult
+    /// UNKNOWN`). Default `false`.
+    #[inline]
+    fn tron_allow_tvm_constantinople(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is the `ALLOW_TVM_TRANSFER_TRC10` proposal (#18) active?
+    /// java `VMConfig.allowTvmTransferTrc10()`. Among other things it decides
+    /// whether `Program.suicide` follows the balance sweep with
+    /// `MUtil.transferAllToken`. Default `false`.
+    #[inline]
+    fn tron_allow_tvm_transfer_trc10(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — is the `ALLOW_TVM_COMPATIBLE_EVM` proposal active? This is
+    /// the first half of java's `allowTvmCompatibleEvm() && getContractVersion()
+    /// == 1` gate on the EIP-150 1/64 retention (`Program.getCallEnergy` /
+    /// `getCreateEnergy`) and the GASPRICE push (`gasPriceAction`). The
+    /// per-frame retention/GASPRICE logic must apply the version gate ONLY when
+    /// this flag is active; otherwise (flag off, or a non-TRON host) it keeps
+    /// the unconditional EIP-150 behaviour. Default `false`.
+    #[inline]
+    fn tron_allow_tvm_compatible_evm(&self) -> bool {
+        false
+    }
+
+    /// **TRON fork** — `DynamicPropertiesStore.getEnergyFee()` (sun per energy),
+    /// the value java's `baseFeeAction` (BASEFEE, OperationActions.java:538)
+    /// pushes, and `gasPriceAction` pushes for a version-1 contract. Exposed to
+    /// the opcode handlers directly (rather than via `BlockEnv.basefee`) so
+    /// setting it doesn't trip revm's legacy `gas_price >= basefee` tx check.
+    /// Default `0`.
+    #[inline]
+    fn tron_energy_fee(&self) -> U256 {
+        U256::ZERO
+    }
+
+    /// **TRON fork** — the root transaction id (`sha256(raw_data)`) of the tx
+    /// currently executing. Used to derive nested-CREATE addresses
+    /// (`0x41 || sha3omit12(rootTxId || nonce_be8)`). Default `ZERO`.
+    #[inline]
+    fn tron_root_tx_id(&self) -> B256 {
+        B256::ZERO
+    }
+
+    /// **TRON fork** — return the current value of this transaction's
+    /// internal-transaction nonce counter, then increment it (post-increment).
+    /// java-tron bumps this counter (`Program.increaseNonce`) on every nested
+    /// CALL (non-precompile), CREATE/CREATE2, SELFDESTRUCT and staking opcode;
+    /// a nested CREATE's address uses the value BEFORE its own bump. Default 0.
+    #[inline]
+    fn tron_bump_create_nonce(&mut self) -> u64 {
+        0
+    }
+
+    /// **TRON fork** — record that a nested CREATE/CREATE2 opcode is deploying a
+    /// contract at `address`, created by `creator` (the executing contract's
+    /// address — java-tron's `getContextAddress`). java-tron's
+    /// `Program.createContractImpl` writes a `SmartContract` row
+    /// (`consumeUserResourcePercent = 100`, `originAddress = creator`,
+    /// `trxHash = rootTxId` iff CREATE2) and marks the account
+    /// `CreatedByContract` / `AccountType.Contract` at this point. The host
+    /// defers the actual chainbase write to commit, applying it only to
+    /// addresses that survive (a reverted create never commits). Default no-op.
+    #[inline]
+    fn tron_record_created_contract(&mut self, _address: Address, _creator: Address, _is_create2: bool) {
+    }
+
+    /// **TRON fork** — `FREEZEEXPIRETIME` (0xd7). Default 0.
+    #[inline]
+    fn tron_freeze_expire_time(
+        &self,
+        _caller_address: Address,
+        _target_address: Address,
+        _resource_type: u32,
+    ) -> i64 {
+        0
+    }
+
+    // ---- State-mutating TRON opcodes (Stake 1.0 + 2.0) ----
+    //
+    // Each returns `(stack_push_value)` — typically 1 for success / 0
+    // for failure, matching java-tron's OperationActions. Defaults are
+    // no-op (return 0), so contracts that call these opcodes get a
+    // graceful "operation skipped" rather than a halt. Real state
+    // mutations need actuator-primitive refactoring + a Host override
+    // — same blocker as the read-side TRON methods.
+
+    /// `FREEZE` (0xd5) — Stake 1.0 freeze. Default: no-op, returns 0.
+    #[inline]
+    fn tron_freeze(
+        &mut self,
+        _caller: Address,
+        _frozen_balance: i64,
+        _frozen_duration: i64,
+        _resource_type: u32,
+        _receiver_address: Option<Address>,
+        _owner_balance: i64,
+    ) -> i64 {
+        0
+    }
+
+    /// `UNFREEZE` (0xd6) — Stake 1.0 unfreeze. Default: no-op.
+    #[inline]
+    fn tron_unfreeze(
+        &mut self,
+        _caller: Address,
+        _resource_type: u32,
+        _receiver_address: Option<Address>,
+    ) -> i64 {
+        0
+    }
+
+    /// `VOTEWITNESS` (0xd8) — cast votes for one or more SR candidates.
+    /// Witnesses + vote counts live at the memory ranges decoded by the
+    /// handler. Default: no-op.
+    #[inline]
+    fn tron_vote_witness(&mut self, _caller: Address, _witnesses: &[(Address, i64)]) -> i64 {
+        0
+    }
+
+    /// `WITHDRAWREWARD` (0xd9) — withdraw accumulated SR rewards.
+    /// Returns the withdrawn amount. Default: 0.
+    #[inline]
+    fn tron_withdraw_reward(&mut self, _caller: Address) -> i64 {
+        0
+    }
+
+    /// `FREEZEBALANCEV2` (0xda) — Stake 2.0 freeze. Default: no-op.
+    #[inline]
+    fn tron_freeze_balance_v2(
+        &mut self,
+        _caller: Address,
+        _frozen_balance: i64,
+        _resource_type: u32,
+        _owner_balance: i64,
+        _owner_selfdestructed: bool,
+    ) -> i64 {
+        0
+    }
+
+    /// `UNFREEZEBALANCEV2` (0xdb) — Stake 2.0 unfreeze. Default: no-op.
+    #[inline]
+    fn tron_unfreeze_balance_v2(
+        &mut self,
+        _caller: Address,
+        _unfreeze_balance: i64,
+        _resource_type: u32,
+    ) -> i64 {
+        0
+    }
+
+    /// `CANCELALLUNFREEZEV2` (0xdc) — cancel every pending unfreeze
+    /// request and re-stake the corresponding amount. Default: no-op.
+    #[inline]
+    fn tron_cancel_all_unfreeze_v2(&mut self, _caller: Address) -> i64 {
+        0
+    }
+
+    /// `WITHDRAWEXPIREUNFREEZE` (0xdd) — sweep any unfreeze entries
+    /// whose maturity has passed. Returns the withdrawn amount.
+    #[inline]
+    fn tron_withdraw_expire_unfreeze(&mut self, _caller: Address) -> i64 {
+        0
+    }
+
+    /// `DELEGATERESOURCE` (0xde) — delegate Stake 2.0 resource.
+    /// Default: no-op.
+    #[inline]
+    fn tron_delegate_resource(
+        &mut self,
+        _caller: Address,
+        _balance: i64,
+        _receiver_address: Address,
+        _resource_type: u32,
+        _lock: bool,
+        _lock_period: i64,
+    ) -> i64 {
+        0
+    }
+
+    /// `UNDELEGATERESOURCE` (0xdf) — undelegate Stake 2.0 resource.
+    /// Default: no-op.
+    #[inline]
+    fn tron_undelegate_resource(
+        &mut self,
+        _caller: Address,
+        _balance: i64,
+        _receiver_address: Address,
+        _resource_type: u32,
+    ) -> i64 {
+        0
+    }
+}
+
+/// Dummy host that implements [`Host`] trait and  returns all default values.
+#[derive(Default, Debug)]
+pub struct DummyHost {
+    gas_params: GasParams,
+}
+
+impl DummyHost {
+    /// Create a new dummy host with the given spec.
+    pub fn new(spec: SpecId) -> Self {
+        Self {
+            gas_params: GasParams::new_spec(spec),
+        }
+    }
+}
+
+impl Host for DummyHost {
+    fn basefee(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn blob_gasprice(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn gas_limit(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn gas_params(&self) -> &GasParams {
+        &self.gas_params
+    }
+
+    fn is_amsterdam_eip8037_enabled(&self) -> bool {
+        false
+    }
+
+    fn cpsb(&self) -> u64 {
+        0
+    }
+
+    fn difficulty(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn prevrandao(&self) -> Option<U256> {
+        None
+    }
+
+    fn block_number(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn timestamp(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn beneficiary(&self) -> Address {
+        Address::ZERO
+    }
+
+    fn slot_num(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn chain_id(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn effective_gas_price(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn caller(&self) -> Address {
+        Address::ZERO
+    }
+
+    fn blob_hash(&self, _number: usize) -> Option<U256> {
+        None
+    }
+
+    fn max_initcode_size(&self) -> usize {
+        0
+    }
+
+    fn block_hash(&mut self, _number: u64) -> Option<B256> {
+        None
+    }
+
+    fn selfdestruct(
+        &mut self,
+        _address: Address,
+        _target: Address,
+        _skip_cold_load: bool,
+    ) -> Result<StateLoad<SelfDestructResult>, LoadError> {
+        Ok(Default::default())
+    }
+
+    fn log(&mut self, _log: Log) {}
+
+    fn tstore(&mut self, _address: Address, _key: StorageKey, _value: StorageValue) {}
+
+    fn tload(&mut self, _address: Address, _key: StorageKey) -> StorageValue {
+        StorageValue::ZERO
+    }
+
+    fn load_account_info_skip_cold_load(
+        &mut self,
+        _address: Address,
+        _load_code: bool,
+        _skip_cold_load: bool,
+    ) -> Result<AccountInfoLoad<'_>, LoadError> {
+        Ok(Default::default())
+    }
+
+    fn sstore_skip_cold_load(
+        &mut self,
+        _address: Address,
+        _key: StorageKey,
+        _value: StorageValue,
+        _skip_cold_load: bool,
+    ) -> Result<StateLoad<SStoreResult>, LoadError> {
+        Ok(Default::default())
+    }
+
+    fn sload_skip_cold_load(
+        &mut self,
+        _address: Address,
+        _key: StorageKey,
+        _skip_cold_load: bool,
+    ) -> Result<StateLoad<StorageValue>, LoadError> {
+        Ok(Default::default())
+    }
+}
