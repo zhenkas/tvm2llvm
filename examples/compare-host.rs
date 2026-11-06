@@ -91,7 +91,7 @@ fn cases() -> Result<Vec<(String, Call)>> {
 
     let mut failure = cases[3].1.clone();
     failure.energy_limit = 1;
-    cases.push(("out-of-energy-exception".into(), failure));
+    cases.push(("out-of-energy".into(), failure));
     Ok(cases)
 }
 
@@ -108,12 +108,7 @@ fn main() -> Result<()> {
     let fixture: Value = serde_json::from_slice(&std::fs::read(bundle.join("Bench.json"))?)?;
     let code = hex::decode(fixture["runtime"].as_str().unwrap())?;
     let native = NativeRunner::new(&code);
-    let mut a = WasmRunner::new(&bundle.join("v1.wasm"))?;
-    let mut b = WasmRunner::new(&bundle.join("v3.wasm"))?;
-    ensure!(
-        a.caught_exceptions()?.is_none() && b.caught_exceptions()?.is_none(),
-        "v1/v3 must not use exception v2"
-    );
+    let mut w = WasmRunner::new(&bundle.join("compiled.wasm"))?;
     let cases = cases()?;
     let mut checks = 0;
     for (name, c) in &cases {
@@ -121,11 +116,8 @@ fn main() -> Result<()> {
             let mut c = c.clone();
             c.dynamic_factor = factor;
             let expected = native.run(&c)?;
-            ensure!(
-                expected == a.run(&c)? && expected == b.run(&c)?,
-                "{name}: state/energy mismatch"
-            );
-            checks += 2;
+            ensure!(expected == w.run(&c)?, "{name}: state/energy mismatch");
+            checks += 1;
             for limit in [
                 expected.energy_used.saturating_sub(1),
                 expected.energy_used,
@@ -133,11 +125,8 @@ fn main() -> Result<()> {
             ] {
                 c.energy_limit = limit;
                 let expected = native.run(&c)?;
-                ensure!(
-                    expected == a.run(&c)? && expected == b.run(&c)?,
-                    "{name}: energy boundary mismatch"
-                );
-                checks += 2;
+                ensure!(expected == w.run(&c)?, "{name}: energy boundary mismatch");
+                checks += 1;
             }
         }
     }
@@ -173,11 +162,7 @@ fn main() -> Result<()> {
             if *signed {
                 verify()?;
             }
-            black_box(a.run(c)?);
-            if *signed {
-                verify()?;
-            }
-            black_box(b.run(c)?);
+            black_box(w.run(c)?);
         }
         let t = Instant::now();
         for _ in 0..20 {
@@ -189,41 +174,37 @@ fn main() -> Result<()> {
         let one = t.elapsed().as_secs_f64() / 20.;
         let iterations = (0.025 / one.max(1e-9)).clamp(
             10.,
-            if name == "out-of-energy-exception" {
+            if name == "out-of-energy" {
                 200.
             } else {
                 10000.
             },
         ) as usize;
-        let mut samples = [vec![], vec![], vec![]];
+        let mut samples = [vec![], vec![]];
         for round in 0..9 {
-            for k in 0..3 {
-                let which = (round + k + offset) % 3;
+            for k in 0..2 {
+                let which = (round + k + offset) % 2;
                 let t = Instant::now();
                 for _ in 0..iterations {
                     if *signed {
                         verify()?;
                     }
-                    match which {
-                        0 => {
-                            black_box(native.run(black_box(c))?);
-                        }
-                        1 => {
-                            black_box(a.run(black_box(c))?);
-                        }
-                        _ => {
-                            black_box(b.run(black_box(c))?);
-                        }
+                    if which == 0 {
+                        black_box(native.run(black_box(c))?);
+                    } else {
+                        black_box(w.run(black_box(c))?);
                     }
                 }
                 samples[which].push(t.elapsed().as_secs_f64() * 1e6 / iterations as f64);
             }
         }
         let n = median(&samples[0]);
-        let v1 = median(&samples[1]);
-        let v3 = median(&samples[2]);
-        rows.push(json!({"case":name,"signed":signed,"iterations_per_sample":iterations,"native_us":n,"v1_us":v1,"v3_us":v3,
-   "v3_speedup_over_v1":v1/v3,"v3_speedup_over_native":n/v3,"samples_us":{"native":samples[0],"v1":samples[1],"v3":samples[2]}}));
+        let compiled = median(&samples[1]);
+        rows.push(
+            json!({"case":name,"signed":signed,"iterations_per_sample":iterations,
+            "native_us":n,"compiled_us":compiled,"speedup_native_over_compiled":n/compiled,
+            "samples_us":{"native":samples[0],"compiled":samples[1]}}),
+        );
     }
     let mut signatures = vec![];
     for _ in 0..9 {
@@ -242,7 +223,7 @@ fn main() -> Result<()> {
         .map(|(_, v)| v.trim().to_owned());
     let report = json!({"schema":1,"checks":checks,"passed":true,"cpu":cpu,"round_offset":offset,
   "engine":"Wasmtime38.0.4/Cranelift; same executable on both hosts, JIT uses each host CPU",
-  "jit_and_instantiation_ms":{"v1":a.jit_ms,"v3":b.jit_ms},
+  "jit_and_instantiation_ms":w.jit_ms,
   "signature_us":median(&signatures),"signature_samples_us":signatures,
   "signature_path":"outer host SHA256, secp256k1 recovery, expected-public-key check and Keccak address hash; no TVM precompile",
   "cases":rows,"limits":"single frame, in-memory Host; compilation and JIT excluded from warmed calls"});

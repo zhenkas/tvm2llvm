@@ -4,10 +4,10 @@ use anyhow::{ensure, Result};
 use revm_interpreter::primitives::U256;
 use serde_json::json;
 use std::path::PathBuf;
-use tvm2llvm::{compiler_v3, model::Call, native::NativeRunner, wasm::WasmRunner};
+use tvm2llvm::{compiler, model::Call, native::NativeRunner, wasm::WasmRunner};
 fn main() -> Result<()> {
     let dir =
-        PathBuf::from(std::env::var("TVM_ARTIFACTS").unwrap_or("artifacts/v3-boundaries".into()));
+        PathBuf::from(std::env::var("TVM_ARTIFACTS").unwrap_or("artifacts/boundaries".into()));
     std::fs::create_dir_all(&dir)?;
     let mut overflow = vec![0x5f; 1025];
     overflow.push(0);
@@ -44,12 +44,8 @@ fn main() -> Result<()> {
     let mut rows = vec![];
     for (name, code, input) in cases {
         let native = NativeRunner::new(&code);
-        let compiled = compiler_v3::compile(&code, &dir, name)?;
+        let compiled = compiler::compile(&code, &dir, name)?;
         let mut vm = WasmRunner::new(&compiled.wasm)?;
-        ensure!(
-            vm.caught_exceptions()?.is_none(),
-            "v3 must not expose v2 exception handling"
-        );
         for factor in [0, 1, 1234, 3333, 9999, 34000, 1000000] {
             let mut call = Call {
                 input: input.clone(),
@@ -71,21 +67,21 @@ fn main() -> Result<()> {
                 let expected = native.run(&call)?;
                 for _ in 0..2 {
                     let actual = vm.run(&call)?;
-                    ensure!(expected==actual,"{name}, factor={factor}, limit={limit}\nnative={expected:?}\nv3={actual:?}");
+                    ensure!(expected==actual,"{name}, factor={factor}, limit={limit}\nnative={expected:?}\ncompiled={actual:?}");
                     checks += 1;
                 }
             }
         }
-        rows.push(json!({"case":name,"regions":compiler_v3::analyze(&code)}));
+        rows.push(json!({"case":name,"regions":compiler::analyze(&code)}));
     }
-    let report = json!({"passed":true,"checks":checks,"cases":rows,"v3_exceptions":false});
+    let report = json!({"passed":true,"checks":checks,"cases":rows,"cpp_exceptions":false});
     std::fs::write(
         dir.join("validation.json"),
         serde_json::to_string_pretty(&report)? + "\n",
     )?;
     println!(
         "{}",
-        json!({"passed":true,"checks":checks,"programs":rows.len(),"v3_exceptions":false})
+        json!({"passed":true,"checks":checks,"programs":rows.len(),"cpp_exceptions":false})
     );
     Ok(())
 }

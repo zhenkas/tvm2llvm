@@ -8,6 +8,6 @@ The three vendored revm crates preserve their upstream MIT license notices and t
 
 The specialization approach was informed by the README of [EF/CF evm2cpp](https://github.com/uni-due-syssec/efcf-evm2cpp). No source from that project was copied or linked. This is an independent implementation.
 
-## Experimental v2 exception toolchain
+## Compiler toolchain
 
-V2 uses pinned wasi-sdk 34 (LLVM/Clang 23.1.0-wasi-sdk) to compile standard Wasm exceptions and link libc++abi/libunwind. These LLVM runtime libraries use Apache-2.0 with LLVM exceptions; their source/licenses are distributed with the upstream LLVM/wasi-sdk projects. The SDK is downloaded outside this repository, verified by SHA-256, and is not vendored. Generated Wasm/object files are ignored. V1 compiler/runtime sources are unchanged. See experiments/v2/README.md for the exact SDK and flags.
+The optional pinned wasi-sdk34 provides LLVM/Clang23.1.0 under Apache-2.0 with LLVM exceptions. Its downloader verifies SHA-256; the SDK remains outside this repository. Contract modules are freestanding and link no libc++abi/libunwind or WASI runtime. Generated object/Wasm files are ignored.

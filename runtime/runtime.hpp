@@ -125,3 +125,35 @@ __uint128_t __multi3(__uint128_t a,__uint128_t b){
   }
  }return z.all;
 }
+
+
+// Successful path: inline preflight, then one debit for the entire static region.
+// Preserve per-op dynamic-factor rounding with a compile-time cost histogram.
+struct BlockStep{uint64_t cost;unsigned required;int delta;};
+struct CostCount{uint64_t cost,count;};
+template<size_t N> __attribute__((always_inline)) inline
+bool reserve_block(uint64_t raw,unsigned required,unsigned peak,const CostCount(&costs)[N]){
+ if(peak>1024||c.sp<required||c.sp>1024-peak)return false;
+ uint64_t total=raw;
+ if(c.factor){
+  for(const auto& entry:costs){
+   const uint64_t penalty=(entry.cost*uint64_t(c.factor))/10000;
+   total+=entry.count*penalty;
+  }
+ }
+ if(c.remaining<total)return false;
+ c.remaining-=total;
+ return true;
+}
+// Only pure, static-cost instructions are grouped. If preflight fails, one of
+// their resource checks must fail before the terminal control-flow instruction.
+// Replay just those checks, in opcode order, to retain exact failure precedence.
+// No word computation, external effect or VM instruction is executed speculatively.
+__attribute__((cold,noinline)) inline uint32_t block_fault(const BlockStep*steps,size_t count){
+ for(size_t i=0;i<count;++i){
+  c.op_raw=0;
+  if(!c.charge(steps[i].cost)||!c.need(steps[i].required,steps[i].delta))return c.status;
+  c.sp=uint32_t(int(c.sp)+steps[i].delta);
+ }
+ c.status=EXCEPTION;return c.status; // An internal planner invariant failed.
+}

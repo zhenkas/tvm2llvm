@@ -30,14 +30,13 @@ def main():
         for index, name in enumerate(names):
             samples = {backend: [s for report in reports
                                   for s in report["cases"][index]["samples_us"][backend]]
-                       for backend in ("native", "v1", "v3")}
+                       for backend in ("native", "compiled")}
             medians = {backend: median(s) for backend, s in samples.items()}
             rows.append({"case": name, "median_us": medians,
-                         "v3_speedup_over_v1": medians["v1"] / medians["v3"],
-                         "v3_speedup_over_native": medians["native"] / medians["v3"],
+                         "speedup_native_over_compiled": medians["native"] / medians["compiled"],
                          "samples_us": samples,
                          "pass_median_us": [{b: r["cases"][index][b + "_us"]
-                                             for b in ("native", "v1", "v3")} for r in reports],
+                                             for b in ("native", "compiled")} for r in reports],
                          "iterations_per_sample": [r["cases"][index]["iterations_per_sample"]
                                                    for r in reports]})
         signatures = [s for r in reports for s in r["signature_samples_us"]]
@@ -58,8 +57,7 @@ def main():
     for host in hosts:
         print(host["host"], host["cpu"], "checks", host["validation_checks"])
         for row in host["cases"]:
-            print(row["case"], json.dumps(row["median_us"]), "v3/native", row["v3_speedup_over_native"],
-                  "v3/v1", row["v3_speedup_over_v1"])
+            print(row["case"], json.dumps(row["median_us"]), "speedup", row["speedup_native_over_compiled"])
         print("signature_us", host["signature_median_us"])
 
 if __name__ == "__main__":

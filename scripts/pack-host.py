@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a Linux benchmark executable and already compiled v1/v3 modules."""
+"""Package a Linux benchmark executable and the compiled contract module."""
 import argparse
 import hashlib
 import json
@@ -12,14 +12,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("output", type=Path)
     p.add_argument("--binary", type=Path, required=True)
-    p.add_argument("--v1", type=Path, required=True)
-    p.add_argument("--v3", type=Path, required=True)
+    p.add_argument("--wasm", type=Path, required=True)
     a = p.parse_args()
     root = Path(__file__).resolve().parents[1]
     a.output.mkdir(parents=True, exist_ok=False)
     bundle = a.output / "bundle"
     bundle.mkdir()
-    files = {"compare-host": a.binary, "v1.wasm": a.v1, "v3.wasm": a.v3,
+    files = {"compare-host": a.binary, "compiled.wasm": a.wasm,
              "Bench.json": root / "fixtures/Bench.json",
              "run-host.py": root / "scripts/run-host.py",
              "SOURCE.json": root / "vendor/SOURCE.json"}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a checksum-verified, precompiled native/v1/v3 bundle on Linux."""
+"""Run a checksum-verified, precompiled native/compiled bundle on Linux."""
 from pathlib import Path
 import argparse
 import hashlib

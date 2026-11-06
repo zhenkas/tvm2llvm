@@ -8,6 +8,25 @@
 Сопоставление с Solidity ниже проверено по source map solc.
 Блоки ниже — дословные фрагменты generated/Lookups.cpp.
 
+## Резервирование прямого участка
+
+Компилятор заранее считает статическую Energy и требования стека до следующей границы. Сначала выполняется один inline reserve_block, затем операции участка. Если бюджета не хватает, cold helper воспроизводит проверки в исходном порядке и возвращает точную ошибку; C++ exceptions не используются.
+
+```cpp
+P0:{
+// 2 straight-line instructions; no interior JUMPDEST, GAS or dynamic charge.
+static constexpr BlockStep steps[]={{3,0,1},{3,0,1},};
+static constexpr CostCount costs[]={{3,2},};
+if(!reserve_block(6, 0, 2, costs))return block_fault(steps,2);
+// PC 0 opcode 0x60
+c.push(Word{{128ULL,0ULL,0ULL,0ULL}});
+// PC 2 opcode 0x60
+c.push(Word{{64ULL,0ULL,0ULL,0ULL}});
+goto P4;}
+```
+
+[План участков](generated/Lookups.blocks.json) и [описание алгоритма](../docs/compiler.md) относятся к этому же генератору. Хеширование, SLOAD и другие операции с динамической стоимостью остаются отдельными границами, как в примерах ниже.
+
 ## Mapping
 
 ```solidity
