@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the pinned exception-capable SDK into a tools directory."""
+"""Fetch the pinned WebAssembly compiler SDK into a tools directory."""
 import hashlib
 from pathlib import Path
 import sys, tarfile, urllib.request

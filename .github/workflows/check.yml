@@ -18,16 +18,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compile:fixtures && npm run compile:lookups && git diff --exit-code -- fixtures/
       - run: cargo fmt --check --package tvm2llvm
+      - run: python3 scripts/fetch-wasi-sdk.py /tmp/tvm2llvm-wasi-sdk
       - run: python3 scripts/run.py check
       - run: python3 scripts/run.py lookups
       - run: git diff --exit-code -- examples/generated/
-      - run: python3 scripts/fetch-wasi-sdk.py /tmp/tvm2llvm-wasi-sdk
-      - run: python3 scripts/run.py check-v2
-      - run: python3 scripts/run.py lookups-v2
-      - run: git diff --exit-code -- examples/generated-v2/
-      - run: python3 scripts/run.py check-v3
-      - run: python3 scripts/run.py boundaries-v3
-      - run: python3 scripts/run.py lookups-v3
-      - run: git diff --exit-code -- examples/generated-v3/
+      - run: python3 scripts/run.py boundaries
       - run: cargo build --release --locked --example compare-host
       - run: python3 -m py_compile scripts/run-host.py scripts/pack-host.py scripts/summarize-hosts.py

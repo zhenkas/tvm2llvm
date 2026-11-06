@@ -1,5 +1,9 @@
 {
   "passed": true,
-  "raw_checks": 1477,
-  "solidity_checks": 180
+  "raw_checks": 1549,
+  "solidity_checks": 180,
+  "boundary_checks": 3960,
+  "boundary_programs": 17,
+  "lookup_checks": 56,
+  "signature_checks": 2
 }

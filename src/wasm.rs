@@ -9,7 +9,7 @@ use revm_interpreter::{
     Host,
 };
 use std::{path::Path, time::Instant};
-use wasmtime::{Caller, Config, Engine, Linker, Memory, Module, Store, TypedFunc};
+use wasmtime::{Caller, Engine, Linker, Memory, Module, Store, TypedFunc};
 struct State {
     ctx: MemoryContext,
 }
@@ -40,14 +40,11 @@ pub struct WasmRunner {
     outptr: TypedFunc<(), i32>,
     outlen: TypedFunc<(), i32>,
     pub jit_ms: f64,
-    caught: Option<TypedFunc<(), i64>>,
 }
 impl WasmRunner {
     pub fn new(path: &Path) -> Result<Self> {
         let t = Instant::now();
-        let mut config = Config::new();
-        config.wasm_exceptions(true);
-        let engine = Engine::new(&config)?;
+        let engine = Engine::default();
         let module = Module::from_file(&engine, path)?;
         let mut linker = Linker::new(&engine);
         linker.func_wrap(
@@ -94,47 +91,6 @@ impl WasmRunner {
                     .log(Log::new_unchecked(CONTRACT, topics, data.into()));
             },
         )?;
-        // libc++abi's failure-reporting imports. They are not a storage or I/O host.
-        // Expected VM exceptions are caught in Wasm. Unexpected libc aborts fail explicitly.
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "proc_exit",
-            |code: i32| -> Result<()> { bail!("unexpected WASI proc_exit({code})") },
-        )?;
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "fd_write",
-            |_: i32, _: i32, _: i32, _: i32| -> i32 { 8 },
-        )?;
-        linker.func_wrap("wasi_snapshot_preview1", "fd_close", |_: i32| -> i32 { 8 })?;
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "fd_seek",
-            |_: i32, _: i64, _: i32, _: i32| -> i32 { 8 },
-        )?;
-        for name in ["args_get", "environ_get"] {
-            linker.func_wrap("wasi_snapshot_preview1", name, |_: i32, _: i32| -> i32 {
-                0
-            })?;
-        }
-        for name in ["args_sizes_get", "environ_sizes_get"] {
-            linker.func_wrap(
-                "wasi_snapshot_preview1",
-                name,
-                |mut caller: Caller<'_, State>, a: i32, b: i32| -> Result<i32> {
-                    mem(&mut caller).write(&mut caller, a as usize, &0u32.to_le_bytes())?;
-                    mem(&mut caller).write(&mut caller, b as usize, &0u32.to_le_bytes())?;
-                    Ok(0)
-                },
-            )?;
-        }
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "clock_time_get",
-            |_: i32, _: i64, _: i32| -> Result<i32> {
-                bail!("unexpected WASI clock_time_get in deterministic contract fixture")
-            },
-        )?;
         let mut store = Store::new(
             &engine,
             State {
@@ -142,9 +98,6 @@ impl WasmRunner {
             },
         );
         let inst = linker.instantiate(&mut store, &module)?;
-        if let Some(ctors) = inst.get_func(&mut store, "__wasm_call_ctors") {
-            ctors.typed::<(), ()>(&store)?.call(&mut store, ())?;
-        }
         let memory = inst.get_memory(&mut store, "memory").unwrap();
         let execute = inst.get_typed_func(&mut store, "execute")?;
         let input = inst
@@ -153,11 +106,7 @@ impl WasmRunner {
         let remaining = inst.get_typed_func(&mut store, "remaining_energy")?;
         let outptr = inst.get_typed_func(&mut store, "output_ptr")?;
         let outlen = inst.get_typed_func(&mut store, "output_len")?;
-        let caught = inst
-            .get_typed_func::<(), i64>(&mut store, "caught_exceptions")
-            .ok();
         Ok(Self {
-            caught,
             store,
             memory,
             execute,
@@ -167,12 +116,6 @@ impl WasmRunner {
             outlen,
             jit_ms: t.elapsed().as_secs_f64() * 1000.,
         })
-    }
-    pub fn caught_exceptions(&mut self) -> Result<Option<u64>> {
-        match &self.caught {
-            Some(f) => Ok(Some(f.call(&mut self.store, ())? as u64)),
-            None => Ok(None),
-        }
     }
     pub fn run(&mut self, call: &Call) -> Result<Outcome> {
         crate::model::validate(call)?;

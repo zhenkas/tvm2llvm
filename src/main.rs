@@ -10,28 +10,11 @@ use std::{
     time::Instant,
 };
 use tvm2llvm::{
-    compiler,
+    compiler::compile,
     model::Call,
     native::{NativeRunner, CALLER},
     wasm::WasmRunner,
 };
-fn compile(code: &[u8], dir: &Path, name: &str) -> Result<compiler::Compilation> {
-    if std::env::var("TVM_VARIANT").as_deref() == Ok("v3") {
-        return tvm2llvm::compiler_v3::compile(code, dir, name);
-    }
-    if std::env::var("TVM_VARIANT").as_deref() == Ok("v2") {
-        let c = tvm2llvm::compiler_v2::compile(code, dir, name)?;
-        Ok(compiler::Compilation {
-            cpp: c.cpp,
-            wasm: c.wasm,
-            generation_ms: c.generation_ms,
-            clang_ms: c.clang_ms,
-            wasm_bytes: c.wasm_bytes,
-        })
-    } else {
-        compiler::compile(code, dir, name)
-    }
-}
 fn input(signature: &str, args: &[U256]) -> Vec<u8> {
     let mut b = keccak256(signature.as_bytes())[..4].to_vec();
     for x in args {
@@ -245,12 +228,6 @@ fn main() -> Result<()> {
         }
     }
     println!("Solidity differential checks passed: {passed}");
-    if std::env::var("TVM_VARIANT").as_deref() == Ok("v2") {
-        ensure!(
-            w.caught_exceptions()?.is_some_and(|n| n > 0),
-            "v2 failing cases must actually cross the C++ catch boundary"
-        );
-    }
 
     if mode != "bench" {
         std::fs::write(
