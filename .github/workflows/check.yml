@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       CARGO_BUILD_JOBS: 2
-      TVM_WASI_SDK: ${{ runner.temp }}/wasi-sdk-34.0-x86_64-linux
+      TVM_WASI_SDK: /tmp/tvm2llvm-wasi-sdk/wasi-sdk-34.0-x86_64-linux
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +21,7 @@ jobs:
       - run: python3 scripts/run.py check
       - run: python3 scripts/run.py lookups
       - run: git diff --exit-code -- examples/generated/
-      - run: python3 scripts/fetch-wasi-sdk.py "${{ runner.temp }}"
+      - run: python3 scripts/fetch-wasi-sdk.py /tmp/tvm2llvm-wasi-sdk
       - run: python3 scripts/run.py check-v2
       - run: python3 scripts/run.py lookups-v2
       - run: git diff --exit-code -- examples/generated-v2/
