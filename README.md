@@ -30,7 +30,7 @@ Generated objects, Wasm and reports go into ignored `artifacts/`; the Lookups wa
 
 ## Hash-path analysis
 
-[Controlled hash measurements](benchmarks/hash-analysis.md) separate direct Keccak, a counted empty Wasm import, the actual hash callback, raw TVM opcodes and the Solidity loop. The bridge now borrows linear memory without a temporary Vec/copy; the remaining contract gap is reported explicitly.
+[Controlled hash measurements](benchmarks/hash-analysis.md) separate direct Keccak, a counted empty Wasm import, the actual hash callback, raw TVM opcodes and the Solidity loop. The bridge now borrows linear memory without a temporary Vec/copy; the remaining contract gap is reported explicitly. A separate [Keccak-inside-Wasm experiment](benchmarks/wasm-keccak.md) compiles the same crypto source as a noinline Wasm function and compares hash placement. It does not change the default host import.
 
 ## What is compared
 

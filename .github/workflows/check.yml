@@ -12,17 +12,19 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: rustup toolchain install 1.91.1 --profile minimal --component rustfmt
+      - run: rustup toolchain install 1.91.1 --profile minimal --component rustfmt --target wasm32-unknown-unknown
       - run: rustup default 1.91.1
       - run: sudo apt-get update && sudo apt-get install -y clang lld
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compile:fixtures && npm run compile:lookups && git diff --exit-code -- fixtures/
       - run: cargo fmt --check --package tvm2llvm
+      - run: cargo fmt --check --manifest-path benchmarks/wasm-keccak/Cargo.toml
       - run: python3 scripts/fetch-wasi-sdk.py /tmp/tvm2llvm-wasi-sdk
       - run: python3 scripts/run.py check
       - run: python3 scripts/run.py lookups
       - run: git diff --exit-code -- examples/generated/
       - run: python3 scripts/run.py boundaries
       - run: python3 scripts/run.py hash
+      - run: python3 scripts/run.py wasm-hash
       - run: cargo build --release --locked --example compare-host
       - run: python3 -m py_compile scripts/run-host.py scripts/pack-host.py scripts/summarize-hosts.py
