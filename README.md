@@ -27,6 +27,10 @@ Optional environment variables: `TVM_CLANG`, `TVM_WASM_LD`, `TVM_ARTIFACTS`, `CA
 
 See [the mapping/array/hash walkthrough and signature example](examples/README.md), [Solidity source](examples/Lookups.sol), and [complete generated C++](examples/generated/Lookups.cpp). Rebuild and validate with `python3 scripts/run.py lookups`; regenerate the Solidity fixture with `npm run compile:lookups`.
 
+## Separate v2 experiment
+
+An opt-in [v2 experiment](experiments/v2/README.md) moves instruction reservation into a `noinline reserve<Op>(cost, inputs, delta)` helper and handles failures with one C++ `try/catch`. V1 remains the default. The comparison uses identical Clang and Wasmtime settings for both variants and includes failure-path costs.
+
 ## What is compared
 
 - **Reference:** the node's TRON-patched revm interpreter with the extracted Frontier-based TVM Energy schedule, modern 1-Energy MLOAD/MSTORE/MSTORE8, and explicit modern fixture flags. Runtime bytecode analysis is reused across calls.

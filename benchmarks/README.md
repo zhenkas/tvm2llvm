@@ -30,3 +30,7 @@ Synthetic outer transaction signature recovery and address hashing: 22.063 µs. 
 Full samples: ryzen-9950x-wsl.json; initial implementation: baseline.json and baseline-runtime.hpp. Correctness: 1,477 raw bytecode checks plus 180 Solidity checks. Tests include dynamic Energy per-opcode rounding.
 
 The optimization forces small helpers to inline and uses bounded 64-bit division for the Energy factor, avoiding compiler-generated wide-multiply support calls. The larger module and longer compile time are part of that tradeoff. Hashing and storage still cross Wasm/Rust boundaries; profiling and stack-to-SSA lowering would be useful next experiments.
+
+## Separate v2 experiment
+
+See [v2 comparison](v2-comparison.md) and [raw data](v2-comparison.json): outlined template reservation plus C++ exceptions substantially reduces compilation time but slows the measured workloads. V1 remains the default.

@@ -1,4 +1,5 @@
 pub mod compiler;
+pub mod compiler_v2;
 pub mod energy;
 pub mod model;
 pub mod native;

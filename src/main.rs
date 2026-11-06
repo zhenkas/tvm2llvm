@@ -15,6 +15,20 @@ use tvm2llvm::{
     native::{NativeRunner, CALLER},
     wasm::WasmRunner,
 };
+fn compile(code: &[u8], dir: &Path, name: &str) -> Result<compiler::Compilation> {
+    if std::env::var("TVM_VARIANT").as_deref() == Ok("v2") {
+        let c = tvm2llvm::compiler_v2::compile(code, dir, name)?;
+        Ok(compiler::Compilation {
+            cpp: c.cpp,
+            wasm: c.wasm,
+            generation_ms: c.generation_ms,
+            clang_ms: c.clang_ms,
+            wasm_bytes: c.wasm_bytes,
+        })
+    } else {
+        compiler::compile(code, dir, name)
+    }
+}
 fn input(signature: &str, args: &[U256]) -> Vec<u8> {
     let mut b = keccak256(signature.as_bytes())[..4].to_vec();
     for x in args {
@@ -40,7 +54,7 @@ fn raw_checks(dir: &Path) -> Result<usize> {
             0x60, 0x40, 0x35, 0x60, 0x20, 0x35, 0x60, 0, 0x35, op, 0x60, 0, 0x52, 0x60, 0x20, 0x60,
             0, 0xf3,
         ];
-        let a = compiler::compile(&code, dir, &format!("op-{op:02x}"))?;
+        let a = compile(&code, dir, &format!("op-{op:02x}"))?;
         let n = NativeRunner::new(&code);
         let mut w = WasmRunner::new(&a.wasm)?;
         let values = [
@@ -76,6 +90,10 @@ fn raw_checks(dir: &Path) -> Result<usize> {
         ("false_jump", "600060015700"),
         ("underflow", "01"),
         ("invalid", "fe"),
+        ("memory-oog", "6300300000600052"),
+        ("returndata-oob", "6001600060003e"),
+        ("store-then-oog", "602a6000556300300000600052"),
+        ("log-then-oog", "60006000a06300300000600052"),
         ("truncated_push", "7f01"),
         ("address", "3060005260206000f3"),
         ("caller", "3360005260206000f3"),
@@ -86,7 +104,7 @@ fn raw_checks(dir: &Path) -> Result<usize> {
     ];
     for (name, h) in samples {
         let code = hex::decode(h)?;
-        let a = compiler::compile(&code, dir, name)?;
+        let a = compile(&code, dir, name)?;
         let n = NativeRunner::new(&code);
         let mut w = WasmRunner::new(&a.wasm)?;
         for limit in [0, 1, 10, 100, 1000, 100000] {
@@ -128,7 +146,7 @@ fn main() -> Result<()> {
     }
     let fixture: Value = serde_json::from_slice(&std::fs::read("fixtures/Bench.json")?)?;
     let code = hex::decode(fixture["runtime"].as_str().unwrap())?;
-    let compiled = compiler::compile(&code, &dir, "Bench")?;
+    let compiled = compile(&code, &dir, "Bench")?;
     let n = NativeRunner::new(&code);
     let mut w = WasmRunner::new(&compiled.wasm)?;
     let mut cases = vec![];
@@ -224,6 +242,13 @@ fn main() -> Result<()> {
         }
     }
     println!("Solidity differential checks passed: {passed}");
+    if std::env::var("TVM_VARIANT").as_deref() == Ok("v2") {
+        ensure!(
+            w.caught_exceptions()?.is_some_and(|n| n > 0),
+            "v2 failing cases must actually cross the C++ catch boundary"
+        );
+    }
+
     if mode != "bench" {
         std::fs::write(
             dir.join("validation.json"),
