@@ -3,6 +3,8 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,5 +16,5 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang lld
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run compile:fixtures && git diff --exit-code -- fixtures/
-      - run: cargo fmt --check --package tvm-tools-cpp
+      - run: cargo fmt --check --package tvm2llvm
       - run: python3 scripts/run.py check
